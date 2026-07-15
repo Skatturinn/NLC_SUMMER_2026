@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/s002.dir/s002.cpp.o -o s002  -Wl,-rpath,/home/jetson/jetcobot_humble_ws/src/MyCobotCppLib/build/lib /home/jetson/jetcobot_humble_ws/src/MyCobotCppLib/build/lib/libmyCobotCpp.so /usr/lib/aarch64-linux-gnu/libQt5SerialPort.so.5.15.3 /usr/lib/aarch64-linux-gnu/libQt5Core.so.5.15.3 
