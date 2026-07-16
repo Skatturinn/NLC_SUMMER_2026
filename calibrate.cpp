@@ -27,7 +27,7 @@ void PrintState(const std::string& phase, mycobot::MyCobotDirect& robot, sensor:
 }
 
 int main() {
-    sensor::ImuMultiplexer esp32_mux("/dev/ttyUSB1", B500000);
+    sensor::ImuMultiplexer esp32_mux("/dev/ttyUSB0", B500000);
     esp32_mux.Start();
     std::this_thread::sleep_for(milliseconds(500)); 
 
@@ -38,7 +38,7 @@ int main() {
     imu_arm.SetKinematicOffsets(75.0, 75.0);
 
     mycobot::MyCobotDirect robot;
-    if (!robot.Connect("/dev/ttyUSB0")) return 1;
+    if (!robot.Connect("/dev/ttyUSB1")) return 1;
 
     robot.PowerOn();
     robot.StopRobot();

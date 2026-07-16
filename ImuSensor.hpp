@@ -59,6 +59,12 @@ private:
     double inv_pitch = 1.0;
     double inv_yaw = 1.0;
 
+    // Axis mapping configuration (Default: 1=X, 2=Y, 3=Z)
+    int map_x = 1;
+    int map_y = 2;
+    int map_z = 3;
+
+
 public:
     void UpdateData(const SensorData& data) {
         quat_w.store(data.quat[0]);
@@ -81,6 +87,14 @@ public:
         inv_pitch = invert_pitch ? -1.0 : 1.0;
         inv_yaw = invert_yaw ? -1.0 : 1.0;
     }
+    // Configures how the IMU's physical axes map to the Robot's axes
+    void SetAxisMapping(int x, int y, int z) {
+        map_x = x;
+        map_y = y;
+        map_z = z;
+    }
+
+
     // Snapshots the current absolute orientation and sets it as the "Zero" frame
     void Tare() {
         tare_w = quat_w.load();
@@ -125,11 +139,14 @@ public:
         return y * inv_yaw; 
     }
 
+
+
     // Endpoint
     // Calculates the 3D endpoint using pure quaternion vector rotation + base offset
+    // Calculates the 3D endpoint using pure quaternion vector rotation + base offset
     std::array<double, 3> GetElbowPosition3D(double link_length_mm, double base_height_mm) const {
-        double link_length_mm = 110.4;
-        double base_height_mm = 131.56;
+        // double link_length_mm = 110.4;
+        // double base_height_mm = 131.56;
         auto q = GetAlignedQuaternion();
         double w = q[0], x = q[1], y = q[2], z = q[3];
 
@@ -138,8 +155,8 @@ public:
         double end_y = link_length_mm * (2.0*x*y + 2.0*z*w);
         double end_z = link_length_mm * (2.0*x*z - 2.0*y*w);
 
-        // 2. Add the physical base height to the Z-axis
-        return {end_x, end_y, end_z + base_height_mm};
+        // 2. Add the physical base height to the Z-axis - invert y and z
+        return {end_x, -end_y, -end_z + base_height_mm};
     }
     // --- RAW GETTERS ---
     std::array<double, 4> GetRawQuaternion() const {
