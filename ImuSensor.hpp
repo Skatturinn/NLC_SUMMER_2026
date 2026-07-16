@@ -1,4 +1,4 @@
-#ifndef IMU_SENSOR_HPP
+ #ifndef IMU_SENSOR_HPP
 #define IMU_SENSOR_HPP
 
 #include <iostream>
@@ -46,6 +46,7 @@ private:
     std::atomic<double> accel_y{0.0};
     std::atomic<double> accel_z{0.0};
 
+    std::atomic<uint32_t> last_timestamp{0};
     // The reference quaternion used to "Tare" or "Re-orient" the IMU
     double tare_w = 1.0;
     double tare_x = 0.0;
@@ -66,7 +67,8 @@ private:
 
 
 public:
-    void UpdateData(const SensorData& data) {
+    void UpdateData(const SensorData& data, uint32_t ts) {
+        last_timestamp.store(ts);
         quat_w.store(data.quat[0]);
         quat_x.store(data.quat[1]);
         quat_y.store(data.quat[2]);
@@ -76,6 +78,8 @@ public:
         accel_y.store(data.linAcc[1]);
         accel_z.store(data.linAcc[2]);
     }
+
+    uint32_t GetTimestamp() const { return last_timestamp.load(); }
 
     void SetKinematicOffsets(double L, double W) {
         length_L = L;
@@ -102,6 +106,14 @@ public:
         tare_y = quat_y.load();
         tare_z = quat_z.load();
     }
+    void SetHardcodedTare(double w, double x, double y, double z) {
+        tare_w = w;
+        tare_x = x;
+        tare_y = y;
+        tare_z = z;
+    }
+
+
 
     // Calculates the mathematically corrected Quaternion relative to the Tare position
     std::array<double, 4> GetAlignedQuaternion() const {
@@ -243,8 +255,8 @@ private:
                         uint8_t expected_crc = CalculateChecksum(buffer + 2, PACKET_SIZE - 3);
                         
                         if (expected_crc == packet->checksum) {
-                            imu_array[0].UpdateData(packet->sensors[0]);
-                            imu_array[1].UpdateData(packet->sensors[1]);
+                            imu_array[0].UpdateData(packet->sensors[0], packet->timestamp);
+                            imu_array[1].UpdateData(packet->sensors[1], packet->timestamp);
 
                             memmove(buffer, buffer + PACKET_SIZE, buffer_len - PACKET_SIZE);
                             buffer_len -= PACKET_SIZE;

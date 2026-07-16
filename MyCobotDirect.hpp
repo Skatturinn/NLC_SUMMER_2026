@@ -153,6 +153,54 @@ public:
         return false;
     }
 
+    // Waits in time, this is sloppy and ideally should not be used
+    void WaitMoveToFinish(int settle_time_ms = 1000) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200)); 
+        while (IsMoving()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(settle_time_ms)); 
+    }
+    // This waits
+    // Actively polls the hardware trajectory state and the encoders
+    bool WaitMoveToAngles(const Angles& target, double tolerance = 2.0, int timeout_ms = 8000) {
+        auto start_time = std::chrono::steady_clock::now();
+        
+        // Wait for the serial command to process and motors to begin moving
+        std::this_thread::sleep_for(std::chrono::milliseconds(200)); 
+        
+        while (true) {
+            // 1. Hardware Check: Did the servo controller finish its trajectory?
+            if (!IsMoving()) {
+                break; // Robot stopped moving due to steady-state error
+            }
+            
+            // 2. Mathematical Check: Did we reach the target within tolerance?
+            Angles current = GetAngles();
+            bool reached_goal = true;
+            for (int i = 0; i < 6; i++) {
+                if (std::abs(current[i] - target[i]) > tolerance) {
+                    reached_goal = false;
+                    break;
+                }
+            }
+            if (reached_goal) {
+                break;
+            }
+            
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count() > timeout_ms) {
+                return false; // Timeout triggered
+            }
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        
+        // Brief mechanical settle once the physical movement stops
+        std::this_thread::sleep_for(std::chrono::milliseconds(500)); 
+        return true; 
+    }
+
     Angles GetAngles() {
         Angles angles = {0};
         if (fd < 0) return angles;
