@@ -125,8 +125,22 @@ public:
         return y * inv_yaw; 
     }
 
-    // Translation, 
-    
+    // Endpoint
+    // Calculates the 3D endpoint using pure quaternion vector rotation + base offset
+    std::array<double, 3> GetElbowPosition3D(double link_length_mm, double base_height_mm) const {
+        double link_length_mm = 110.4;
+        double base_height_mm = 131.56;
+        auto q = GetAlignedQuaternion();
+        double w = q[0], x = q[1], y = q[2], z = q[3];
+
+        // 1. Rotate the arm length vector (L, 0, 0) by the IMU quaternion
+        double end_x = link_length_mm * (1.0 - 2.0*y*y - 2.0*z*z);
+        double end_y = link_length_mm * (2.0*x*y + 2.0*z*w);
+        double end_z = link_length_mm * (2.0*x*z - 2.0*y*w);
+
+        // 2. Add the physical base height to the Z-axis
+        return {end_x, end_y, end_z + base_height_mm};
+    }
     // --- RAW GETTERS ---
     std::array<double, 4> GetRawQuaternion() const {
         return {quat_w.load(), quat_x.load(), quat_y.load(), quat_z.load()};
