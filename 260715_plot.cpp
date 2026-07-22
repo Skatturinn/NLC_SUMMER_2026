@@ -21,7 +21,7 @@ int main() {
     imu_arm.SetAxisMapping(1, 2, 3);
     
     // Replace with your physical offset values
-    imu_arm.SetHardcodedTare(1.0, 0.0, 0.0, 0.0);
+// wrong    imu_arm.SetHardcodedTare(1.0, 0.0, 0.0, 0.0);
 
     mycobot::MyCobotDirect robot;
     if (!robot.Connect("/dev/ttyUSB1")) return 1;
@@ -34,13 +34,21 @@ int main() {
     mycobot::Angles start_pos = {0, 0, 0, 0, 0, 0};
     robot.WriteAngles(start_pos, 30);
     robot.WaitMoveToAngles(start_pos);
-
+    // Replace the old homing and Tare() logic with this:
+    
+    // Read the current position of the encoders
+    mycobot::Angles current_pos = robot.GetAngles();
+    
+    // Pass the Pan (Joint 1) and Tilt (Joint 2) directly into the new dynamic tare
+    imu_arm.DynamicTare(current_pos[0], current_pos[1]);
+    
+    std::cout << "IMU dynamically aligned to current physical pose.\n";
     // 2. Command the sweep
     mycobot::Angles target_pos = {45, 45, 0, 0, 0, 0};
     robot.WriteAngles(target_pos, 15); 
     
     // Allow the trajectory to begin before starting the while loop
-    std::this_thread::sleep_for(milliseconds(200));
+    // no ? std::this_thread::sleep_for(milliseconds(200));
 
     std::cout << "Timestamp_ms,Enc_X,Enc_Y,Enc_Z,IMU_X,IMU_Y,IMU_Z\n";
 

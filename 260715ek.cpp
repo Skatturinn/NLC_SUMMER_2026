@@ -60,7 +60,7 @@ void TestPosition(mycobot::MyCobotDirect& robot, sensor::ImuState& imu, mycobot:
 }
 
 int main() {
-    sensor::ImuMultiplexer esp32_mux("/dev/ttyUSB0", B500000);
+    sensor::ImuMultiplexer esp32_mux("/dev/ttyUSB1", B500000);
     esp32_mux.Start();
     std::this_thread::sleep_for(milliseconds(500)); 
 
@@ -71,7 +71,7 @@ int main() {
     imu_arm.SetAxisMapping(1, 2, 3);
 
     mycobot::MyCobotDirect robot;
-    if (!robot.Connect("/dev/ttyUSB1")) return 1;
+    if (!robot.Connect("/dev/ttyUSB0")) return 1;
     robot.PowerOn();
 
     std::cout << "Homing robot for IMU alignment...\n";

@@ -1,4 +1,4 @@
- #ifndef IMU_SENSOR_HPP
+#ifndef IMU_SENSOR_HPP
 #define IMU_SENSOR_HPP
 
 #include <iostream>
@@ -98,31 +98,29 @@ public:
         map_z = z;
     }
 
+    std::array<double, 4> GetMappedQuaternion() const {
+        double raw[4] = {quat_w.load(), quat_x.load(), quat_y.load(), quat_z.load()};
+        
+        auto apply_map = [&](int map_val) {
+            return (map_val < 0 ? -1.0 : 1.0) * raw[std::abs(map_val)];
+        };
 
+        return {raw[0], apply_map(map_x), apply_map(map_y), apply_map(map_z)};
+    }
     // Snapshots the current absolute orientation and sets it as the "Zero" frame
     void Tare() {
+        auto mq = GetMappedQuaternion();
         tare_w = quat_w.load();
         tare_x = quat_x.load();
         tare_y = quat_y.load();
         tare_z = quat_z.load();
     }
-    void SetHardcodedTare(double w, double x, double y, double z) {
-        tare_w = w;
-        tare_x = x;
-        tare_y = y;
-        tare_z = z;
-    }
 
-
-
-    // Calculates the mathematically corrected Quaternion relative to the Tare position
     std::array<double, 4> GetAlignedQuaternion() const {
-        // Q_aligned = Q_tare^(-1) * Q_current
-        // The inverse of a unit quaternion Q[w,x,y,z] is [w,-x,-y,-z]
         double w1 = tare_w, x1 = -tare_x, y1 = -tare_y, z1 = -tare_z;
-        double w2 = quat_w.load(), x2 = quat_x.load(), y2 = quat_y.load(), z2 = quat_z.load();
+        auto mq = GetMappedQuaternion();
+        double w2 = mq[0], x2 = mq[1], y2 = mq[2], z2 = mq[3];
 
-        // Quaternion Multiplication
         double w = w1*w2 - x1*x2 - y1*y2 - z1*z2;
         double x = w1*x2 + x1*w2 + y1*z2 - z1*y2;
         double y = w1*y2 - x1*z2 + y1*w2 + z1*x2;
@@ -130,6 +128,69 @@ public:
 
         return {w, x, y, z};
     }
+
+    void SetHardcodedTare(double w, double x, double y, double z) {
+        tare_w = w;
+        tare_x = x;
+        tare_y = y;
+        tare_z = z;
+    }
+    // Helper function for standard Quaternion multiplication
+    std::array<double, 4> MultiplyQuat(const std::array<double, 4>& q1, const std::array<double, 4>& q2) const {
+        return {{
+            q1[0]*q2[0] - q1[1]*q2[1] - q1[2]*q2[2] - q1[3]*q2[3],
+            q1[0]*q2[1] + q1[1]*q2[0] + q1[2]*q2[3] - q1[3]*q2[2],
+            q1[0]*q2[2] - q1[1]*q2[3] + q1[2]*q2[0] + q1[3]*q2[1],
+            q1[0]*q2[3] + q1[1]*q2[2] - q1[2]*q2[1] + q1[3]*q2[0]
+        }};
+    }
+
+    // Tares the IMU at any position by trusting the current encoder angles 100%
+    void DynamicTare(double pan_deg, double tilt_deg) { // currently is only for imu that takes in two encoder angles
+        double pan_rad = pan_deg * M_PI / 180.0;
+        double tilt_rad = tilt_deg * M_PI / 180.0;
+
+        // 1. Convert encoder Pan (Z-axis) to a quaternion
+        std::array<double, 4> qZ = {cos(pan_rad / 2.0), 0.0, 0.0, sin(pan_rad / 2.0)};
+        
+        // 2. Convert encoder Tilt (Y-axis) to a quaternion
+        std::array<double, 4> qY = {cos(tilt_rad / 2.0), 0.0, sin(tilt_rad / 2.0), 0.0};
+
+        // 3. Combine them to find the expected orientation (Q_enc = Q_Z * Q_Y)
+        std::array<double, 4> qExpected = MultiplyQuat(qZ, qY);
+
+        // 4. Calculate the inverse of the expected orientation
+        std::array<double, 4> qExpInv = {qExpected[0], -qExpected[1], -qExpected[2], -qExpected[3]};
+
+        // 5. Get the current raw IMU reading
+        std::array<double, 4> qRaw = GetMappedQuaternion();
+
+        // 6. Calculate the perfect offset (Q_tare = Q_raw * Q_enc^-1)
+        std::array<double, 4> new_tare = MultiplyQuat(qRaw, qExpInv);
+
+        // 7. Apply the new tare
+        tare_w = new_tare[0];
+        tare_x = new_tare[1];
+        tare_y = new_tare[2];
+        tare_z = new_tare[3];
+    }
+
+
+    // Calculates the mathematically corrected Quaternion relative to the Tare position
+//    std::array<double, 4> GetAlignedQuaternion() const {
+        // Q_aligned = Q_tare^(-1) * Q_current
+        // The inverse of a unit quaternion Q[w,x,y,z] is [w,-x,-y,-z]
+    //    double w1 = tare_w, x1 = -tare_x, y1 = -tare_y, z1 = -tare_z;
+  //      double w2 = quat_w.load(), x2 = quat_x.load(), y2 = quat_y.load(), z2 = quat_z.load();
+//
+  //      // Quaternion Multiplication
+//        double w = w1*w2 - x1*x2 - y1*y2 - z1*z2;
+      //  double x = w1*x2 + x1*w2 + y1*z2 - z1*y2;
+    //    double y = w1*y2 - x1*z2 + y1*w2 + z1*x2;
+  //      double z = w1*z2 + x1*y2 - y1*x2 + z1*w2;
+//
+  //      return {w, x, y, z};
+//    }
 
     // --- LAZY EULER EVALUATION ---
     // Converts the ALIGNED quaternion to Euler angles only when called

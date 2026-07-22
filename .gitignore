@@ -1,0 +1,23 @@
+*.o
+*.obj
+*.slo
+*.lo
+
+*.gch
+*.pch
+*.so
+*.dylib
+*.dll
+*.lai
+*.la
+*.a
+*.lib
+
+*.exe
+*.out
+*.app
+a.out
+
+# In the future we will ignore the entire build
+# build/
+# bin/
