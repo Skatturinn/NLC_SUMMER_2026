@@ -81,22 +81,20 @@ public:
 
     uint32_t GetTimestamp() const { return last_timestamp.load(); }
 
-    void SetKinematicOffsets(double L, double W) {
-        length_L = L;
-        width_W = W;
+
+    std::array<double, 4> GetNormalizedQuaternion() const {
+        double w = quat_w.load(), x = quat_x.load(), y = quat_y.load(), z = quat_z.load();
+        double mag = std::sqrt(w*w + x*x + y*y + z*z);
+        if (mag < 1e-6) return {1.0, 0.0, 0.0, 0.0};
+        return {w/mag, x/mag, y/mag, z/mag}; 
     }
 
-    void SetAxisInversion(bool invert_roll, bool invert_pitch, bool invert_yaw) {
-        inv_roll = invert_roll ? -1.0 : 1.0;
-        inv_pitch = invert_pitch ? -1.0 : 1.0;
-        inv_yaw = invert_yaw ? -1.0 : 1.0;
-    }
-    // Configures how the IMU's physical axes map to the Robot's axes
     void SetAxisMapping(int x, int y, int z) {
         map_x = x;
         map_y = y;
         map_z = z;
     }
+
 
     std::array<double, 4> GetMappedQuaternion() const {
         double raw[4] = {quat_w.load(), quat_x.load(), quat_y.load(), quat_z.load()};
@@ -105,28 +103,50 @@ public:
             return (map_val < 0 ? -1.0 : 1.0) * raw[std::abs(map_val)];
         };
 
-        return {raw[0], apply_map(map_x), apply_map(map_y), apply_map(map_z)};
+        double w = raw[0];
+        double x = apply_map(map_x);
+        double y = apply_map(map_y);
+        double z = apply_map(map_z);
+
+        double mag = std::sqrt(w*w + x*x + y*y + z*z);
+        if (mag < 1e-6) return {1.0, 0.0, 0.0, 0.0};
+        
+        return {w/mag, x/mag, y/mag, z/mag}; 
     }
+    // nonsense --- void SetKinematicOffsets(double L, double W) {
+    //    length_L = L;
+  //      width_W = W;
+//    }
+
+    void SetAxisInversion(bool invert_roll, bool invert_pitch, bool invert_yaw) {
+        inv_roll = invert_roll ? -1.0 : 1.0;
+        inv_pitch = invert_pitch ? -1.0 : 1.0;
+        inv_yaw = invert_yaw ? -1.0 : 1.0;
+    }
+    // Configures how the IMU's physical axes map to the Robot's axes
+   
+
     // Snapshots the current absolute orientation and sets it as the "Zero" frame
     void Tare() {
-        auto mq = GetMappedQuaternion();
-        tare_w = quat_w.load();
-        tare_x = quat_x.load();
-        tare_y = quat_y.load();
-        tare_z = quat_z.load();
+        auto nq = GetNormalizedQuaternion();
+        tare_w = nq[0];
+        tare_x = nq[1];
+        tare_y = nq[2];
+        tare_z = nq[3];
     }
 
     std::array<double, 4> GetAlignedQuaternion() const {
-        double w1 = tare_w, x1 = -tare_x, y1 = -tare_y, z1 = -tare_z;
-        auto mq = GetMappedQuaternion();
-        double w2 = mq[0], x2 = mq[1], y2 = mq[2], z2 = mq[3];
+        //double w1 = tare_w, x1 = -tare_x, y1 = -tare_y, z1 = -tare_z;
+        //auto mq = GetMappedQuaternion();
+        //double w2 = mq[0], x2 = mq[1], y2 = mq[2], z2 = mq[3];
 
-        double w = w1*w2 - x1*x2 - y1*y2 - z1*z2;
-        double x = w1*x2 + x1*w2 + y1*z2 - z1*y2;
-        double y = w1*y2 - x1*z2 + y1*w2 + z1*x2;
-        double z = w1*z2 + x1*y2 - y1*x2 + z1*w2;
-
-        return {w, x, y, z};
+        //double w = w1*w2 - x1*x2 - y1*y2 - z1*z2;
+        //double x = w1*x2 + x1*w2 + y1*z2 - z1*y2;
+        //double y = w1*y2 - x1*z2 + y1*w2 + z1*x2;
+        //double z = w1*z2 + x1*y2 - y1*x2 + z1*w2;
+        std::array<double, 4> q_tare_inv = {tare_w, -tare_x, - tare_y, -tare_z};
+        std::array<double, 4> q_curr = GetNormalizedQuaternion();
+        return MultiplyQuat(q_tare_inv, q_curr);
     }
 
     void SetHardcodedTare(double w, double x, double y, double z) {
@@ -163,7 +183,7 @@ public:
         std::array<double, 4> qExpInv = {qExpected[0], -qExpected[1], -qExpected[2], -qExpected[3]};
 
         // 5. Get the current raw IMU reading
-        std::array<double, 4> qRaw = GetMappedQuaternion();
+        std::array<double, 4> qRaw = GetNormalizedQuaternion();
 
         // 6. Calculate the perfect offset (Q_tare = Q_raw * Q_enc^-1)
         std::array<double, 4> new_tare = MultiplyQuat(qRaw, qExpInv);
@@ -217,24 +237,37 @@ public:
     // Endpoint
     // Calculates the 3D endpoint using pure quaternion vector rotation + base offset
     // Calculates the 3D endpoint using pure quaternion vector rotation + base offset
+    // Restored exact user math for Y-axis
     std::array<double, 3> GetElbowPosition3D(double link_length_mm, double base_height_mm) const {
-        // double link_length_mm = 110.4;
-        // double base_height_mm = 131.56;
         auto q = GetAlignedQuaternion();
-        double w = q[0], x = q[1], y = q[2], z = q[3];
+        
+        // Final normalization to guarantee mathematically strict arm length
+        double mag = std::sqrt(q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3]);
+        double w = q[0]/mag, x = q[1]/mag, y = q[2]/mag, z = q[3]/mag;
 
-        // 1. Rotate the arm length vector (L, 0, 0) by the IMU quaternion
-        double end_x = link_length_mm * (1.0 - 2.0*y*y - 2.0*z*z);
-        double end_y = link_length_mm * (2.0*x*y + 2.0*z*w);
-        double end_z = link_length_mm * (2.0*x*z - 2.0*y*w);
+        double end_x = link_length_mm * (2.0*x*z + 2.0*y*w);
+        double end_y = link_length_mm * (2.0*y*z + 2.0*x*w); // Restored your explicit formula
+        double end_z = link_length_mm * (1.0 - 2.0*x*x - 2.0*y*y);
 
         // 2. Add the physical base height to the Z-axis - invert y and z
-        return {end_x, -end_y, -end_z + base_height_mm};
+        return {-end_x, end_y, end_z + base_height_mm};
     }
+    // Normalized
+    // Safely reads and enforces mathematical normalization to prevent vector shrinking
+    //std::array<double, 4> GetNormalizedQuaternion() const {
+        //double w = quat_w.load(), x = quat_x.load(), y = quat_y.load(), z = quat_z.load();
+      //  double mag = std::sqrt(w*w + x*x + y*y + z*z);
+    //
+      //  if (mag < 1e-6) return {1.0, 0.0, 0.0, 0.0}; // Prevent divide by zero
+    //
+       // return {w/mag, x/mag, y/mag, z/mag}; 
+     //   }
     // --- RAW GETTERS ---
     std::array<double, 4> GetRawQuaternion() const {
         return {quat_w.load(), quat_x.load(), quat_y.load(), quat_z.load()};
     }
+
+
 
     double GetAccelX() const { return accel_x.load(); }
     double GetAccelY() const { return accel_y.load(); }

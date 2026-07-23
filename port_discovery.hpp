@@ -8,9 +8,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <termios.h>
+#include <chrono>
 
 #include "MyCobotDirect.hpp"
-#include "ImuSensor.hpp"
 
 namespace fs = std::filesystem;
 
@@ -37,111 +37,56 @@ inline RobotPorts autoDiscoverDevices() {
 
     std::cout << "Scanning " << candidate_ports.size() << " candidate serial ports..." << std::endl;
 
-    // 2. PASS 1: Identify the IMU ESP32 by testing for valid incoming 119-byte packets at 500000 baud
     for (const std::string& port : candidate_ports) {
-        std::cout << "Testing port for IMU stream (500000 baud): " << port << "..." << std::endl;
-
+        std::cout << "  Testing port: " << port << "..." << std::endl;
+        
         int fd = open(port.c_str(), O_RDWR | O_NOCTTY | O_SYNC);
-        if (fd != -1) {
-            struct termios tty;
-            tcgetattr(fd, &tty);
-            cfsetospeed(&tty, B500000);
-            cfsetispeed(&tty, B500000);
-            tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
-            tty.c_iflag &= ~IGNBRK;
-            tty.c_lflag = 0;
-            tty.c_oflag = 0;
-            tty.c_cc[VMIN]  = 0;
-            tty.c_cc[VTIME] = 2; // 200ms timeout per read check
-            tcsetattr(fd, TCSANOW, &tty);
-            tcflush(fd, TCIFLUSH);
+        if (fd == -1) continue;
 
-            // Give the ESP32 a brief window to stream data frames
-            int valid_packets_seen = 0;
-            uint8_t buffer[256];
-            size_t buffer_len = 0;
-            auto start_time = std::chrono::steady_clock::now();
+        struct termios tty;
+        tcgetattr(fd, &tty);
+        cfsetospeed(&tty, B500000);
+        cfsetispeed(&tty, B500000);
+        tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
+        tty.c_iflag &= ~IGNBRK;
+        tty.c_lflag = 0;
+        tty.c_oflag = 0;
+        tty.c_cc[VMIN]  = 0;
+        tty.c_cc[VTIME] = 2; // 200ms timeout
+        tty.c_cflag |= (CLOCAL | CREAD);
+        tcsetattr(fd, TCSANOW, &tty);
+        tcflush(fd, TCIFLUSH);
 
-            while (std::chrono::steady_clock::now() - start_time < std::chrono::milliseconds(1500)) {
-                uint8_t chunk[64];
-                int n = read(fd, chunk, sizeof(chunk));
-                if (n > 0) {
-                    for (int i = 0; i < n; i++) {
-                        if (buffer_len < sizeof(buffer)) buffer[buffer_len++] = chunk[i];
-                    }
+        bool is_imu = false;
+        auto start = std::chrono::steady_clock::now();
+        uint8_t prev_byte = 0x00;
 
-                    // Check if we have accumulated enough bytes for a full packet (119 bytes)
-                    while (buffer_len >= sizeof(sensor::ImuDataPacket)) {
-                        // Look for the 0xAA 0xBB header inside the accumulated buffer
-                        size_t start_idx = 0;
-                        bool found = false;
-                        for (size_t i = 0; i <= buffer_len - sizeof(sensor::ImuDataPacket); i++) {
-                            if (buffer[i] == 0xAA && buffer[i+1] == 0xBB) {
-                                start_idx = i;
-                                found = true;
-                                break;
-                            }
-                        }
-
-                        if (!found) {
-                            buffer_len = 0;
-                            break;
-                        }
-
-                        if (start_idx > 0) {
-                            memmove(buffer, buffer + start_idx, buffer_len - start_idx);
-                            buffer_len -= start_idx;
-                        }
-
-                        if (buffer_len >= sizeof(sensor::ImuDataPacket)) {
-                            sensor::ImuDataPacket* pkt = reinterpret_cast<sensor::ImuDataPacket*>(buffer);
-                            
-                            // Simple checksum validation
-                            uint8_t crc = 0;
-                            const uint8_t* ptr = reinterpret_cast<const uint8_t*>(buffer);
-                            for (size_t j = 2; j < sizeof(sensor::ImuDataPacket) - 1; ++j) {
-                                crc ^= ptr[j];
-                            }
-
-                            if (crc == pkt->checksum) {
-                                valid_packets_seen++;
-                                memmove(buffer, buffer + sizeof(sensor::ImuDataPacket), buffer_len - sizeof(sensor::ImuDataPacket));
-                                buffer_len -= sizeof(sensor::ImuDataPacket);
-                            } else {
-                                memmove(buffer, buffer + 1, buffer_len - 1);
-                                buffer_len -= 1;
-                            }
-                        }
-                    }
+        // FAST SCAN: Just look for the raw 0xAA 0xBB header stream (Max 800ms wait)
+        while (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(800)) {
+            uint8_t buf[128];
+            int n = read(fd, buf, sizeof(buf));
+            for(int i = 0; i < n; ++i) {
+                if (prev_byte == 0xAA && buf[i] == 0xBB) {
+                    is_imu = true;
+                    break;
                 }
-                if (valid_packets_seen >= 2) break; // Confirmed active stream!
+                prev_byte = buf[i];
             }
-            close(fd);
+            if (is_imu) break;
+        }
+        close(fd);
 
-            if (valid_packets_seen >= 2) {
-                std::cout << "--> Identified IMU ESP32 on " << port << std::endl;
-                found_ports.imu_port = port;
-                break;
+        if (is_imu) {
+            std::cout << "--> Identified IMU ESP32 on " << port << std::endl;
+            found_ports.imu_port = port;
+        } else {
+            // Confirm it's the arm
+            mycobot::MyCobotDirect test_arm;
+            if (test_arm.Connect(port, B1000000)) {
+                std::cout << "--> Identified myCobot Arm on " << port << std::endl;
+                found_ports.arm_port = port;
+                test_arm.Disconnect();
             }
-        }
-    }
-
-    // 3. PASS 2: Assign the remaining port to the MyCobot Arm (tested at 1000000 baud)
-    for (const std::string& port : candidate_ports) {
-        if (port == found_ports.imu_port) {
-            continue;
-        }
-
-        std::cout << "Testing remaining port for MyCobot Arm (1000000 baud): " << port << "..." << std::endl;
-        mycobot::MyCobotDirect test_arm;
-        if (test_arm.Connect(port, B1000000)) {
-            mycobot::Angles test_angles = test_arm.GetAngles();
-            test_arm.Disconnect();
-
-            // If it responds without crashing, it's the arm
-            std::cout << "--> Identified myCobot Arm on " << port << std::endl;
-            found_ports.arm_port = port;
-            break;
         }
     }
 
