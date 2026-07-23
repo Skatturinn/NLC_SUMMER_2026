@@ -246,7 +246,7 @@ public:
         double w = q[0]/mag, x = q[1]/mag, y = q[2]/mag, z = q[3]/mag;
 
         double end_x = link_length_mm * (2.0*x*z + 2.0*y*w);
-        double end_y = link_length_mm * (2.0*y*z + 2.0*x*w); // Restored your explicit formula
+        double end_y = link_length_mm * (2.0*y*z - 2.0*x*w); //
         double end_z = link_length_mm * (1.0 - 2.0*x*x - 2.0*y*y);
 
         // 2. Add the physical base height to the Z-axis - invert y and z

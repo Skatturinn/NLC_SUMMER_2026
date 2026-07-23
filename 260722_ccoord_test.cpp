@@ -24,7 +24,7 @@ void WaitUntilTargetReached(mycobot::MyCobotDirect& robot, const mycobot::Angles
             }
         }
         if (reached) break;
-        std::this_thread::sleep_for(milliseconds(100));
+        std::this_thread::sleep_for(milliseconds(500));
     }
 }
 
@@ -45,7 +45,7 @@ int main() {
     sensor::ImuState& imu_arm = esp32_mux.imu_array[0];
     
     // Testing the Y-Z axis swap to fix the flat Y coordinate
-    imu_arm.SetAxisMapping(1, -3, 2);
+    imu_arm.SetAxisMapping(1, 2, 3);
 
     // 3. Connect to robot
     mycobot::MyCobotDirect robot;
@@ -69,7 +69,7 @@ int main() {
 
     const double BASE_HEIGHT = 131.22; 
     const double ARM_LENGTH = 110.4;
-    const double FIXED_TILT = 45.0; 
+    const double FIXED_TILT = 60.0; 
 
     // Full circle pan sweep in 30-degree increments
     std::vector<double> pan_angles = {

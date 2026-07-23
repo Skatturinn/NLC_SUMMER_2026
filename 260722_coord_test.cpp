@@ -89,7 +89,7 @@ int main() {
         double tilt_rad = FIXED_TILT * M_PI / 180.0;
 
         double exp_x = -ARM_LENGTH * sin(tilt_rad) * cos(pan_rad);
-        double exp_y = ARM_LENGTH * sin(tilt_rad) * sin(pan_rad);
+        double exp_y = -ARM_LENGTH * sin(tilt_rad) * sin(pan_rad);
         double exp_z = (ARM_LENGTH * cos(tilt_rad)) + BASE_HEIGHT;
 
         std::array<double, 3> imu_pos = imu_arm.GetElbowPosition3D(ARM_LENGTH, BASE_HEIGHT);
