@@ -130,8 +130,8 @@ int main() {
     std::this_thread::sleep_for(milliseconds(500)); 
 
     sensor::ImuState& imu_arm = esp32_mux.imu_array[0];
-    imu_arm.SetAxisMapping(1, -2, -3); // Adjust to your physical mounting
-
+// this is nonsense and needs to be deleted in future    imu_arm.SetAxisMapping(1, -2, -3); // Adjust to your physical mounting
+    imu_arm.SetMountingRotation(0.0, 1.0, 0.0, 0.0); // We rotate the imu 180 around x
     mycobot::MyCobotDirect robot;
     if (!robot.Connect(ports.arm_port)) return 1;
     robot.PowerOn();

@@ -65,7 +65,7 @@ private:
     int map_y = 2;
     int map_z = 3;
 
-
+    std::array<double, 4> q_mount_offset = {1.0, 0.0, 0.0, 0.0};
 public:
     void UpdateData(const SensorData& data, uint32_t ts) {
         last_timestamp.store(ts);
@@ -82,12 +82,21 @@ public:
     uint32_t GetTimestamp() const { return last_timestamp.load(); }
 
 
+    void SetMountingRotation(double w, double x, double y, double z) {
+        q_mount_offset = {w, x, y, z};
+    }
     std::array<double, 4> GetNormalizedQuaternion() const {
         double w = quat_w.load(), x = quat_x.load(), y = quat_y.load(), z = quat_z.load();
         double mag = std::sqrt(w*w + x*x + y*y + z*z);
         if (mag < 1e-6) return {1.0, 0.0, 0.0, 0.0};
         return {w/mag, x/mag, y/mag, z/mag}; 
     }
+
+    std::array<double, 4> GetMountedQuaternion() const {
+        std::array<double, 4> q_raw = GetNormalizedQuaternion();
+        return MultiplyQuat(q_mount_offset, q_raw);
+    }
+
 
     void SetAxisMapping(int x, int y, int z) {
         map_x = x;
@@ -128,7 +137,7 @@ public:
 
     // Snapshots the current absolute orientation and sets it as the "Zero" frame
     void Tare() {
-        auto nq = GetNormalizedQuaternion();
+        auto nq = GetMountedQuaternion();
         tare_w = nq[0];
         tare_x = nq[1];
         tare_y = nq[2];
@@ -144,8 +153,8 @@ public:
         //double x = w1*x2 + x1*w2 + y1*z2 - z1*y2;
         //double y = w1*y2 - x1*z2 + y1*w2 + z1*x2;
         //double z = w1*z2 + x1*y2 - y1*x2 + z1*w2;
-        std::array<double, 4> q_tare_inv = {tare_w, -tare_x, - tare_y, -tare_z};
-        std::array<double, 4> q_curr = GetNormalizedQuaternion();
+        std::array<double, 4> q_tare_inv = {tare_w, -tare_x, -tare_y, -tare_z};
+        std::array<double, 4> q_curr = GetMountedQuaternion();
         return MultiplyQuat(q_tare_inv, q_curr);
     }
 
