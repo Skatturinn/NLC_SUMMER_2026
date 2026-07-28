@@ -38,43 +38,48 @@ Eigen::Matrix4d GetDHMatrix(double theta, double d, double a, double alpha) {
 }
 
 
+// Translates the 4x1 state vector into a 6x1 expected measurement vector
 Eigen::VectorXd h(const Eigen::VectorXd& x) {
-    Eigen::VectorXd z_expected = Eigen::VectorXd::Zero(6);
+    Eigen::VectorXd z_expected = Eigen::VectorXd::Zero(6); 
 
-    // The first two measurements are what we expect the encoders to say.
-    // Our best guess for the encoders is simply our current state angle.
     double q1 = x(0);
     double q2 = x(1);
     z_expected(0) = q1; 
     z_expected(1) = q2;
 
+    // 1. Calculate the Absolute DH Quaternion at HOME (0, 0)
+    double dh_home[2][4] = {
+        {M_PI / 2.0,  0.0,      0.13122, 0.0},
+        {0.0,        -0.1104,   0.0,     -M_PI / 2.0}
+    };
+    Eigen::Matrix4d T_home = Eigen::Matrix4d::Identity();
+    for (int i = 0; i < 2; i++) {
+        T_home = T_home * GetDHMatrix(dh_home[i][3], dh_home[i][2], dh_home[i][1], dh_home[i][0]);
+    }
+    Eigen::Quaterniond quat_home(T_home.block<3, 3>(0, 0));
 
-    double dh_params[2][4] = {
+    // 2. Calculate the Absolute DH Quaternion at CURRENT State
+    double dh_current[2][4] = {
         {M_PI / 2.0,  0.0,      0.13122, q1},
         {0.0,        -0.1104,   0.0,     q2 - M_PI / 2.0}
     };
-
     Eigen::Matrix4d T_current = Eigen::Matrix4d::Identity();
-
     for (int i = 0; i < 2; i++) {
-        Eigen::Matrix4d A_i = GetDHMatrix(dh_params[i][3], dh_params[i][2], dh_params[i][1], dh_params[i][0]);
-        T_current = T_current * A_i;
+        T_current = T_current * GetDHMatrix(dh_current[i][3], dh_current[i][2], dh_current[i][1], dh_current[i][0]);
     }
+    Eigen::Quaterniond quat_current(T_current.block<3, 3>(0, 0));
 
-    // Convert the resulting 3x3 rotation matrix into a Quaternion
-    Eigen::Quaterniond quat_expected(T_current.block<3, 3>(0, 0));
+    // 3. Find the RELATIVE rotation (matches the IMU Tare behavior)
+    Eigen::Quaterniond quat_expected = quat_home.conjugate() * quat_current;
     
-    // Fill the last 4 slots of our measurement vector with the quaternion
+    // 4. Fill the measurement vector
     z_expected(2) = quat_expected.w();
     z_expected(3) = quat_expected.x();
     z_expected(4) = quat_expected.y();
     z_expected(5) = quat_expected.z();
     
     return z_expected;
-
-
 }
-
 
 
 // Computes the 6x4 Jacobian Matrix numerically
@@ -125,7 +130,7 @@ int main() {
     std::this_thread::sleep_for(milliseconds(500)); 
 
     sensor::ImuState& imu_arm = esp32_mux.imu_array[0];
-    imu_arm.SetAxisMapping(1, 2, 3); // Adjust to your physical mounting
+    imu_arm.SetAxisMapping(1, -2, -3); // Adjust to your physical mounting
 
     mycobot::MyCobotDirect robot;
     if (!robot.Connect(ports.arm_port)) return 1;
@@ -207,6 +212,11 @@ int main() {
                       << "J1(Enc: " << std::setw(6) << current_encoders[0] << " True: " << std::setw(6) << (x(0) * 180.0 / M_PI) << ") | "
                       << "J2(Enc: " << std::setw(6) << current_encoders[1] << " True: " << std::setw(6) << (x(1) * 180.0 / M_PI) << ")\n";
 
+
+
+           std::cout << "     IMU Quat: [" << std::setw(6) << q1[0] << ", " << std::setw(6) << q1[1] << ", " << std::setw(6) << q1[2] << ", " << std::setw(6) << q1[3] << "]\n";
+           std::cout << "     EKF Quat: [" << std::setw(6) << z_expected(2) << ", " << std::setw(6) << z_expected(3) << ", " << std::setw(6) << z_expected(4) << ", " << std::setw(6) << z_expected(5) << "]\n";
+            
             // Check if physically reached target
             if (std::abs(current_encoders[0] - target[0]) <= 3.0 && std::abs(current_encoders[1] - target[1]) <= 3.0) {
                 reached_target = true;
