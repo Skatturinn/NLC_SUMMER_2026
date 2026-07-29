@@ -176,7 +176,9 @@ public:
             }
             
             // 2. Mathematical Check: Did we reach the target within tolerance?
-            Angles current = GetAngles();
+            //Angles current = GetAngles();
+            mycobot::Angles current;
+            bool serial_valid = GetAngles(current);
             bool reached_goal = true;
             for (int i = 0; i < 6; i++) {
                 if (std::abs(current[i] - target[i]) > tolerance) {
@@ -201,10 +203,8 @@ public:
         return true; 
     }
 
-    Angles GetAngles() {
-        Angles angles = {0};
-        if (fd < 0) return angles;
-
+    // Returns TRUE if data was successfully read, FALSE if serial timed out
+    bool GetAngles(Angles& out_angles) {
         FlushBuffer();
         WriteCommand(0x20); // Read Angles
         std::vector<uint8_t> data = ReadPacket(0x20);
@@ -212,11 +212,29 @@ public:
         if (data.size() >= 12) {
             for (int i = 0; i < 6; ++i) {
                 int16_t val = (data[i*2] << 8) | data[i*2 + 1];
-                angles[i] = static_cast<double>(val) / 100.0;
+                out_angles[i] = static_cast<double>(val) / 100.0;
             }
+            return true; // Valid data received
         }
-        return angles;
+        return false; // Serial Timeout / Robot Brownout
     }
+
+
+//    Angles GetAngles() {
+//        Angles angles = {0};
+//        if (fd < 0) return angles;
+//        FlushBuffer();
+//        WriteCommand(0x20); // Read Angles
+//        std::vector<uint8_t> data = ReadPacket(0x20);
+//        
+//        if (data.size() >= 12) {
+//            for (int i = 0; i < 6; ++i) {
+//                int16_t val = (data[i*2] << 8) | data[i*2 + 1];
+//                angles[i] = static_cast<double>(val) / 100.0;
+//            }
+//        }
+//        return angles;
+//    }
 
     void WriteAngles(const Angles& angles, int speed = DefaultSpeed) {
         if (fd < 0) return;

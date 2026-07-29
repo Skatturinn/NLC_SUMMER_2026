@@ -104,7 +104,9 @@ Eigen::MatrixXd ComputeMeasurementJacobian(const Eigen::VectorXd& x) {
 // A simple blocking function to ensure the robot has physically stopped
 void WaitUntilTargetReached(mycobot::MyCobotDirect& robot, const mycobot::Angles& target) {
     for (int timeout = 0; timeout < 60; ++timeout) { 
-        mycobot::Angles current = robot.GetAngles();
+        // mycobot::Angles current = robot.GetAngles();
+        mycobot::Angles current;
+        bool serial_valid = robot.GetAngles(current);
         bool reached = true;
         for (int j = 0; j < 2; j++) { // Only checking first two joints for this test
             if (std::abs(current[j] - target[j]) > 3.0) { 
@@ -186,7 +188,14 @@ int main() {
             P = F * P * F.transpose() + Q;
 
             // --- B. READ SENSORS ---
-            mycobot::Angles current_encoders = robot.GetAngles();
+            // old // mycobot::Angles current_encoders = robot.GetAngles();
+            mycobot::Angles current_encoders;
+            bool serial_valid = robot.GetAngles(current_encoders);
+            if (!serial_valid) {
+                std::cout << "[EKF " << std::setw(3) << timeout_counter << "] SERIAL TIMEOUT! Robot unresponsive. Coasting...\n";
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                continue; 
+            }
             std::array<double, 4> q1 = imu_arm.GetAlignedQuaternion();
 
             // Populate Actual Measurement Vector (z)
