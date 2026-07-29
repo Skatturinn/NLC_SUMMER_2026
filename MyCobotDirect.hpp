@@ -207,7 +207,8 @@ public:
     bool GetAngles(Angles& out_angles) {
         FlushBuffer();
         WriteCommand(0x20); // Read Angles
-        std::vector<uint8_t> data = ReadPacket(0x20);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::vector<uint8_t> data = ReadPacket(0x20, 40);
         
         if (data.size() >= 12) {
             for (int i = 0; i < 6; ++i) {
@@ -216,6 +217,7 @@ public:
             }
             return true; // Valid data received
         }
+        FlushBuffer();
         return false; // Serial Timeout / Robot Brownout
     }
 
