@@ -81,7 +81,11 @@ public:
     MyCobotDirect() : fd(-1) {}
     ~MyCobotDirect() { Disconnect(); }
 
+    std::string current_port;
+    int current_baud = B1000000;
     bool Connect(const std::string& port, int baud_rate = B1000000) {
+        current_port = port;
+        current_baud = baud_rate;
         fd = open(port.c_str(), O_RDWR | O_NOCTTY | O_SYNC);
         if (fd < 0) return false;
 
@@ -102,8 +106,23 @@ public:
         tty.c_cc[VTIME] = 1; 
         
         tcsetattr(fd, TCSANOW, &tty);
-        FlushBuffer();
+        tcflush(fd, TCIOFLUSH);
+//        FlushBuffer();
         return true;
+    }
+
+
+    bool HardReconnect() {
+        if (fd >= 0) {
+            close(fd);
+            fd = -1;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        bool success = Connect(current_port, current_baud);
+        if (success) {
+            tcflush(fd, TCIOFLUSH);
+        }
+        return success;
     }
 
     void Disconnect() {
@@ -205,10 +224,12 @@ public:
 
     // Returns TRUE if data was successfully read, FALSE if serial timed out
     bool GetAngles(Angles& out_angles) {
-        FlushBuffer();
+        if (fd < 0) return false;
+        tcflush(fd, TCIFLUSH);
+//        FlushBuffer();
         WriteCommand(0x20); // Read Angles
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        std::vector<uint8_t> data = ReadPacket(0x20, 40);
+        //std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::vector<uint8_t> data = ReadPacket(0x20, 150);
         
         if (data.size() >= 12) {
             for (int i = 0; i < 6; ++i) {

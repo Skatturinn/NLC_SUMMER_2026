@@ -83,7 +83,13 @@ public:
 
 
     void SetMountingRotation(double w, double x, double y, double z) {
-        q_mount_offset = {w, x, y, z};
+        double mag = std::sqrt(w*w + x*x + y*y + z*z);
+        if (mag < 1e-6) {
+            q_mount_offset = {1.0, 0.0, 0.0, 0.0};
+        } else {
+            q_mount_offset = {w/mag, x/mag, y/mag, z/mag};
+        }
+//        q_mount_offset = {w, x, y, z};
     }
     std::array<double, 4> GetNormalizedQuaternion() const {
         double w = quat_w.load(), x = quat_x.load(), y = quat_y.load(), z = quat_z.load();
@@ -137,7 +143,7 @@ public:
 
     // Snapshots the current absolute orientation and sets it as the "Zero" frame
     void Tare() {
-        auto nq = GetMountedQuaternion();
+        auto nq = GetNormalizedQuaternion();
         tare_w = nq[0];
         tare_x = nq[1];
         tare_y = nq[2];
@@ -153,9 +159,26 @@ public:
         //double x = w1*x2 + x1*w2 + y1*z2 - z1*y2;
         //double y = w1*y2 - x1*z2 + y1*w2 + z1*x2;
         //double z = w1*z2 + x1*y2 - y1*x2 + z1*w2;
+        ////std::array<double, 4> q_tare_inv = {tare_w, -tare_x, -tare_y, -tare_z};
+        ////std::array<double, 4> q_curr = GetMountedQuaternion();
+        ////return MultiplyQuat(q_tare_inv, q_curr);
+        std::array<double, 4> q_raw = GetNormalizedQuaternion();
+        
+        // 1. Relative rotation from home position in sensor space: Q_rel = Q_tare^-1 * Q_raw
         std::array<double, 4> q_tare_inv = {tare_w, -tare_x, -tare_y, -tare_z};
-        std::array<double, 4> q_curr = GetMountedQuaternion();
-        return MultiplyQuat(q_tare_inv, q_curr);
+        std::array<double, 4> q_rel = MultiplyQuat(q_tare_inv, q_raw);
+
+        // 2. Inverse of mounting rotation: Q_mount^-1 = [w, -x, -y, -z]
+        std::array<double, 4> q_mount_inv = {
+            q_mount_offset[0], 
+           -q_mount_offset[1], 
+           -q_mount_offset[2], 
+           -q_mount_offset[3]
+        };
+
+        // 3. Conjugate by mounting offset to transform coordinate axes: Q_mount * Q_rel * Q_mount^-1
+        std::array<double, 4> temp = MultiplyQuat(q_mount_offset, q_rel);
+        return MultiplyQuat(temp, q_mount_inv);
     }
 
     void SetHardcodedTare(double w, double x, double y, double z) {
