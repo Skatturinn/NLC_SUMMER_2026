@@ -52,8 +52,8 @@ private:
         Eigen::Matrix4d T_curr = T1 * T2;
         
         Eigen::Quaterniond quat_curr(T_curr.block<3, 3>(0, 0));
-        Eigen::Quaterniond quat_expected = quat_home.conjugate() * quat_curr;
-
+// this was wrong? needs to be flipped //        Eigen::Quaterniond quat_expected = quat_home.conjugate() * quat_curr;
+        Eigen::Quaterniond quat_expected = quat_curr * quat_home.conjugate();
         Eigen::VectorXd z(4);
         z << quat_expected.w(), quat_expected.x(), quat_expected.y(), quat_expected.z();
         return z;
@@ -88,6 +88,14 @@ public:
         Eigen::Matrix4d T_home_2 = GetJointTransformFast(-M_PI / 2.0, T_const_2);
         quat_home = Eigen::Quaterniond((T_home_1 * T_home_2).block<3, 3>(0, 0));
     }
+
+    void SetState(double q1_rad, double q2_rad) {
+        x(0) = q1_rad;
+        x(1) = q2_rad;
+        x(2) = 0.0;
+        x(3) = 0.0;
+    }
+
 
     // --- A. PREDICT STEP ---
     void Predict(double dt) {
