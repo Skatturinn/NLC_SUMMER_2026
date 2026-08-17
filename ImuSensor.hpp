@@ -150,6 +150,25 @@ public:
         tare_z = nq[3];
     }
 
+    void TareQuat(const std::array<double, 4>& target_q) {
+        // 1. Calculate the inverse of the target orientation
+        std::array<double, 4> qExpInv = {target_q[0], -target_q[1], -target_q[2], -target_q[3]};
+
+        // 2. Get the current raw IMU reading
+        std::array<double, 4> qRaw = GetNormalizedQuaternion();
+
+        // 3. Calculate the perfect offset (Q_tare = Q_raw * Q_enc^-1)
+        // This is the exact same math you used beautifully in DynamicTare()
+        std::array<double, 4> new_tare = MultiplyQuat(qRaw, qExpInv);
+
+        // 4. Apply the new tare to the class variables
+        tare_w = new_tare[0];
+        tare_x = new_tare[1];
+        tare_y = new_tare[2];
+        tare_z = new_tare[3];
+    }
+
+
     std::array<double, 4> GetAlignedQuaternion() const {
         //double w1 = tare_w, x1 = -tare_x, y1 = -tare_y, z1 = -tare_z;
         //auto mq = GetMappedQuaternion();

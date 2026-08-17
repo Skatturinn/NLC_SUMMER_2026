@@ -318,8 +318,8 @@ private:
     // Cross-Thread Encoder Data
     std::mutex encoder_mutex_;
     mycobot::Angles latest_encoders_;
-    bool new_encoder_data_ready_ = false;
-    bool is_initialized_ = false;
+	bool new_encoder_data_ready_ = false;
+    std::atomic<bool> is_initialized_{false};
 
     // Final API State
     RobotState current_state_;
@@ -388,6 +388,11 @@ private:
 
                 if (has_new_enc && !is_initialized_) {
                     ukf_filter_.InitState(enc_copy);
+                    // Immediately populate the state so Start() can read it!
+                    {
+                        std::lock_guard<std::mutex> state_lock(state_mutex_);
+                        current_state_.raw_encoders = enc_copy;
+                    }
                     is_initialized_ = true;
                     last_time = std::chrono::steady_clock::now();
                     continue; 
@@ -497,18 +502,97 @@ public:
         }
         robot_.PowerOn();
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(500)); 
-        imu_mux_->imu_array[0].Tare();
-        imu_mux_->imu_array[1].Tare();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
+        // We start the background threads after the robot is connected and IMUs are initialized
         if (!keep_running_) {
             keep_running_ = true;
             io_thread_ = std::thread(&RobotInterface::EncoderCommandThread, this);
             imu_thread_ = std::thread(&RobotInterface::ImuUkfThread, this);
         }
 
+		std::cout << "Waiting for IO thread to fetch initial encoder data..." << std::flush;
+		std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+
+        // 2. WAIT FOR STATE TO POPULATE
+        bool ready = false;
+        RobotState initial_state;
+        
+        for(int i = 0; i < 50; ++i) { // Give it up to 5 seconds
+            // is_initialized_ is set to true by ImuUkfThread once it gets the first encoders
+            if (is_initialized_) {
+                initial_state = GetState();
+                ready = true;
+                std::cout << " Success!" << std::endl;
+                break;
+            }
+            std::cout << "." << std::flush;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        }
+
+        // 3. PERFORM DYNAMIC TARE
+        if (ready) {
+            std::array<double, 4> expected_q2 = ComputeDhQuaternion2(initial_state.raw_encoders[0], initial_state.raw_encoders[1]);
+            
+            Eigen::Matrix<double, 6, 1> enc_vec;
+            for(int i = 0; i < 6; ++i) enc_vec(i) = initial_state.raw_encoders[i];
+            std::array<double, 4> expected_q5 = ComputeDhQuaternion5(enc_vec);
+
+            imu_mux_->imu_array[0].TareQuat(expected_q2);
+            imu_mux_->imu_array[1].TareQuat(expected_q5);
+            std::cout << "Dynamically tared IMUs to current encoder positions." << std::endl;
+        } else {
+            std::cerr << "\nFailed to read initial encoders after 5 seconds. Falling back to zero tare." << std::endl;
+            imu_mux_->imu_array[0].Tare();
+            imu_mux_->imu_array[1].Tare();
+        }
+
         std::cout << "RobotInterface successfully started dual-thread execution." << std::endl;
         return 0;
+    }
+    
+	void Home() {
+        if (!keep_running_) {
+            std::cerr << "Robot is not running. Call Start() first." << std::endl;
+            return;
+        }
+
+        std::cout << "Sending robot to home position (0,0,0,0,0,0)..." << std::endl;
+        mycobot::Angles zero_angles = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        
+        // Use thread-safe queue instead of direct serial writes
+        SendAngleCommand(zero_angles, 30);
+
+        auto start_time = std::chrono::steady_clock::now();
+        bool reached_home = false;
+
+        // Monitor state until the robot reaches zero
+        while (std::chrono::steady_clock::now() - start_time < std::chrono::seconds(15)) {
+            RobotState state = GetState();
+            
+            bool all_zero = true;
+            for (int i = 0; i < 6; ++i) {
+                if (std::abs(state.raw_encoders[i]) > 1.5) { // 1.5 degree tolerance
+                    all_zero = false;
+                    break;
+                }
+            }
+
+            if (all_zero && !active_command_) {
+                reached_home = true;
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
+        if (reached_home) {
+            std::cout << "Robot reached home. Taring IMUs to zero." << std::endl;
+            // Use standard tare to zero out at the 0,0,0,0,0,0 position
+            imu_mux_->imu_array[0].Tare();
+            imu_mux_->imu_array[1].Tare();
+        } else {
+            std::cerr << "Timeout waiting for robot to reach home position." << std::endl;
+        }
     }
 
     void Stop() {
