@@ -23,9 +23,18 @@
 // SHARED KINEMATICS MATH (HIGHLY OPTIMIZED)
 // ============================================================================
 
+// DH parameters taken from mycobot m280 elephant robotics documentation
+// https://docs.elephantrobotics.com/docs/mycobot-pi-en/2-serialproduct/2.1-280/2.1.2.1%20Introduction%20of%20product%20parameters.html
+// https://docs.elephantrobotics.com/docs/mycobot-pi-en/resourse/2-serialproduct/2.1-280/M5/2.1.1.1%E4%BA%A7%E5%93%81%E5%8F%82%E6%95%B0%E4%BB%8B%E7%BB%8D/SDH%E5%8F%82%E6%95%B0%E8%A1%A8.png
+// Theta is the only variable, we pre compute the result from the other paramteres and create a function of theta for real time
 struct DHLink {
-    double ca, sa, a, d, theta_offset;
+    double ca, // cos(alpha)
+	 sa, // sin(alpha) 
+	 a, // length of the common normal. Assuming a revolute joint, this is the radius about previous z. (Description taken from Wiki)
+	 d, // offset along previous z to the common normal
+	 theta_offset;
 };
+// Dh parameters Wiki: https://en.wikipedia.org/wiki/Denavit%E2%80%93Hartenberg_parameters
 
 static constexpr DHLink LINKS[6] = {
     { 0.0,  1.0,  0.0,      0.13122,  0.0 },            // J1: alpha = 90
@@ -327,7 +336,7 @@ private:
 
     // Slow Thread (20Hz): Writes commands and reads blocking serial bus
     void EncoderCommandThread() {
-        const auto interval = std::chrono::milliseconds(50); 
+        const auto interval = std::chrono::milliseconds(20); 
         while (keep_running_) {
             auto loop_start = std::chrono::steady_clock::now();
             bool sent_command = false;
@@ -347,7 +356,7 @@ private:
                 }
             }
 
-            if (!sent_command) {
+            //if (!sent_command) {
                 mycobot::Angles encoders;
                 bool valid = robot_.GetAngles(encoders);
                 if (valid) {
@@ -355,7 +364,7 @@ private:
                     latest_encoders_ = encoders;
                     new_encoder_data_ready_ = true;
                 }
-            }
+            //}
 
             auto elapsed = std::chrono::steady_clock::now() - loop_start;
             if (elapsed < interval) {
@@ -517,18 +526,34 @@ public:
         // 2. WAIT FOR STATE TO POPULATE
         bool ready = false;
         RobotState initial_state;
-        
-        for(int i = 0; i < 50; ++i) { // Give it up to 5 seconds
-            // is_initialized_ is set to true by ImuUkfThread once it gets the first encoders
-            if (is_initialized_) {
+
+
+        for(int i = 0; i < 30; ++i) { // 30 tries * 100ms = 3 seconds
+            if (is_initialized_.load()) {
                 initial_state = GetState();
                 ready = true;
                 std::cout << " Success!" << std::endl;
                 break;
             }
             std::cout << "." << std::flush;
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Fixed from 1000ms
         }
+        //for(int i = 0; i < 50; ++i) { // Give it up to 5 seconds
+            // is_initialized_ is set to true by ImuUkfThread once it gets the first encoders
+            //if (is_initialized_.load()) {
+        //std::cout << "waiting" << std::endl;
+        //while (!is_initialized_.load()) {
+        //    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        //    std::cout << "." << std::flush;
+        //}
+        //initial_state = GetState();
+        //ready = true;
+          //      std::cout << " Success!" << std::endl;
+                //break;
+            //}
+           // std::cout << "." << std::flush;
+            //std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        //}
 
         // 3. PERFORM DYNAMIC TARE
         if (ready) {
@@ -605,6 +630,7 @@ public:
         if (imu_mux_) imu_mux_->Stop();
         
         robot_.StopRobot();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
         robot_.Disconnect();
     }
 
