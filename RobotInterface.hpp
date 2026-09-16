@@ -543,7 +543,7 @@ public:
         }
 
 		std::cout << "Waiting for IO thread to fetch initial encoder data..." << std::flush;
-		std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+		std::this_thread::sleep_for(std::chrono::milliseconds(3000));
 
         // 2. WAIT FOR STATE TO POPULATE
         bool ready = false;
