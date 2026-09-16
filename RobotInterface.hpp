@@ -345,10 +345,10 @@ private:
 
     // Slow Thread (20Hz): Writes commands and reads blocking serial bus
     void EncoderCommandThread() {
-        const auto interval = std::chrono::milliseconds(50); // 20hz loop, 50ms
-        while (keep_running_) { // atomic bool
-            auto loop_start = std::chrono::steady_clock::now(); 
-            bool sent_command = false; // to block sendind and reading from encoders in same loop
+        const auto interval = std::chrono::milliseconds(50); 
+        while (keep_running_) {
+            auto loop_start = std::chrono::steady_clock::now();
+            bool sent_command = false;
 
             {
                 std::lock_guard<std::mutex> lock(queue_mutex_); // lock queue mutex
@@ -365,14 +365,14 @@ private:
                 }
             }
 
-            if (!sent_command) { // we did not find a command in the queue, we read encoders
+            if (!sent_command) {
                 mycobot::Angles encoders;
                 bool valid = robot_.GetAngles(encoders);
                 if (valid) {
-                    std::lock_guard<std::mutex> lock(encoder_mutex_); // lock mutex in this scope/block 
-                    latest_encoders_ = encoders; // nupdate value
-                    new_encoder_data_ready_ = true; // This is to tell other threads
-                } // exit block, mutex unlocked others can access encoder values safely
+                    std::lock_guard<std::mutex> lock(encoder_mutex_);
+                    latest_encoders_ = encoders;
+                    new_encoder_data_ready_ = true;
+                }
             }
 
             auto elapsed = std::chrono::steady_clock::now() - loop_start;
@@ -548,18 +548,34 @@ public:
         // 2. WAIT FOR STATE TO POPULATE
         bool ready = false;
         RobotState initial_state;
-        
-        for(int i = 0; i < 50; ++i) { // Give it up to 5 seconds
-            // is_initialized_ is set to true by ImuUkfThread once it gets the first encoders
-            if (is_initialized_) {
+
+
+        for(int i = 0; i < 30; ++i) { // 30 tries * 100ms = 3 seconds
+            if (is_initialized_.load()) {
                 initial_state = GetState();
                 ready = true;
                 std::cout << " Success!" << std::endl;
                 break;
             }
             std::cout << "." << std::flush;
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Fixed from 1000ms
         }
+        //for(int i = 0; i < 50; ++i) { // Give it up to 5 seconds
+            // is_initialized_ is set to true by ImuUkfThread once it gets the first encoders
+            //if (is_initialized_.load()) {
+        //std::cout << "waiting" << std::endl;
+        //while (!is_initialized_.load()) {
+        //    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        //    std::cout << "." << std::flush;
+        //}
+        //initial_state = GetState();
+        //ready = true;
+          //      std::cout << " Success!" << std::endl;
+                //break;
+            //}
+           // std::cout << "." << std::flush;
+            //std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        //}
 
         // 3. PERFORM DYNAMIC TARE
         if (ready) {
@@ -636,6 +652,7 @@ public:
         if (imu_mux_) imu_mux_->Stop();
         
         robot_.StopRobot();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
         robot_.Disconnect();
     }
 
