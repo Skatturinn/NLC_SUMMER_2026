@@ -23,9 +23,18 @@
 // SHARED KINEMATICS MATH (HIGHLY OPTIMIZED)
 // ============================================================================
 
+// DH parameters taken from mycobot m280 elephant robotics documentation
+// https://docs.elephantrobotics.com/docs/mycobot-pi-en/2-serialproduct/2.1-280/2.1.2.1%20Introduction%20of%20product%20parameters.html
+// https://docs.elephantrobotics.com/docs/mycobot-pi-en/resourse/2-serialproduct/2.1-280/M5/2.1.1.1%E4%BA%A7%E5%93%81%E5%8F%82%E6%95%B0%E4%BB%8B%E7%BB%8D/SDH%E5%8F%82%E6%95%B0%E8%A1%A8.png
+// Theta is the only variable, we pre compute the result from the other paramteres and create a function of theta for real time
 struct DHLink {
-    double ca, sa, a, d, theta_offset;
+    double ca, // cos(alpha)
+	 sa, // sin(alpha) 
+	 a, // length of the common normal. Assuming a revolute joint, this is the radius about previous z. (Description taken from Wiki)
+	 d, // offset along previous z to the common normal
+	 theta_offset;
 };
+// Dh parameters Wiki: https://en.wikipedia.org/wiki/Denavit%E2%80%93Hartenberg_parameters
 
 static constexpr DHLink LINKS[6] = {
     { 0.0,  1.0,  0.0,      0.13122,  0.0 },            // J1: alpha = 90
@@ -37,6 +46,7 @@ static constexpr DHLink LINKS[6] = {
 };
 
 inline Eigen::Matrix4d GetTransform(double q_deg, const DHLink& link) {
+	// Takes in the angle from the servo in degrees and the respective parameters of that link
     double theta = (q_deg * M_PI / 180.0) + link.theta_offset;
     double ct = std::cos(theta);
     double st = std::sin(theta);
@@ -136,19 +146,27 @@ public:
     }
 
     void Predict(double dt, const Eigen::Matrix<double, 6, 1>& u_cmd) {
-        Eigen::Matrix<double, 12, 12> F = Eigen::Matrix<double, 12, 12>::Identity();
+        Eigen::Matrix<double, 12, 12> F = Eigen::Matrix<double, 12, 12>::Identity(); 
         for (int i = 0; i < 6; i++) {
-            F(i, i + 6) = dt; // pos = pos + vel * dt
+            F(i, i + 6) = dt; // pos = pos + vel * dt 
+			// pos is x_(0 to 5), vel is x_(6 to 11); 
+			// we are adding dt to the F matrix in row 0 to 5 (pos) and column 6 to 11 (elocity)
         }
 
         for (int i = 0; i < 6; i++) {
             x_(i + 6) = (0.2 * x_(i + 6)) + (0.8 * u_cmd(i)); 
+			// velocity = 0.2 * current_velocity + 0.8 * commanded_velocity
         }
 
         x_ = F * x_;
+		// position = velocity * dt + position ()
         Eigen::Matrix<double, 12, 12> Q = Eigen::Matrix<double, 12, 12>::Identity() * 0.05;
+		// Q is a diagonal matrix of 0.05
         P_ = F * P_ * F.transpose() + Q;
+		// P is a diagonal matrix of 0.1 at init, we update
+		// P = F * 0.1 * F transpoed, now the dt is in the 6-11 row and column 0-5 + 0.05
     }
+
 
     void UpdateIMU(const std::array<double, 4>& imu2_quat, const std::array<double, 4>& imu5_quat) {
         const int L = 12; 
@@ -327,96 +345,98 @@ private:
 
     // Slow Thread (20Hz): Writes commands and reads blocking serial bus
     void EncoderCommandThread() {
-        const auto interval = std::chrono::milliseconds(50); 
-        while (keep_running_) {
-            auto loop_start = std::chrono::steady_clock::now();
-            bool sent_command = false;
+        const auto interval = std::chrono::milliseconds(50); // 20hz loop, 50ms
+        while (keep_running_) { // atomic bool
+            auto loop_start = std::chrono::steady_clock::now(); 
+            bool sent_command = false; // to block sendind and reading from encoders in same loop
 
             {
-                std::lock_guard<std::mutex> lock(queue_mutex_);
-                if (!command_queue_.empty()) {
-                    MotorCommand next_cmd = command_queue_.front();
-                    command_queue_.pop();
-                    robot_.WriteAngles(next_cmd.angles, next_cmd.speed);
+                std::lock_guard<std::mutex> lock(queue_mutex_); // lock queue mutex
+                if (!command_queue_.empty()) { // read command queue
+                    MotorCommand next_cmd = command_queue_.front(); // take first command
+                    command_queue_.pop(); // remove command
+                    robot_.WriteAngles(next_cmd.angles, next_cmd.speed); // send command to robot by API
                     
-                    std::lock_guard<std::mutex> target_lock(target_state_mutex_);
-                    target_angles_ = next_cmd.angles;
-                    target_speed_ = next_cmd.speed;
-                    active_command_ = true;
-                    sent_command = true;
+                    std::lock_guard<std::mutex> target_lock(target_state_mutex_); // lock target
+                    target_angles_ = next_cmd.angles; // write angles
+                    target_speed_ = next_cmd.speed; // write speed
+                    active_command_ = true; // what is this for?
+                    sent_command = true; // local scope, we skip
                 }
             }
 
-            if (!sent_command) {
+            if (!sent_command) { // we did not find a command in the queue, we read encoders
                 mycobot::Angles encoders;
                 bool valid = robot_.GetAngles(encoders);
                 if (valid) {
-                    std::lock_guard<std::mutex> lock(encoder_mutex_);
-                    latest_encoders_ = encoders;
-                    new_encoder_data_ready_ = true;
-                }
+                    std::lock_guard<std::mutex> lock(encoder_mutex_); // lock mutex in this scope/block 
+                    latest_encoders_ = encoders; // nupdate value
+                    new_encoder_data_ready_ = true; // This is to tell other threads
+                } // exit block, mutex unlocked others can access encoder values safely
             }
 
             auto elapsed = std::chrono::steady_clock::now() - loop_start;
             if (elapsed < interval) {
-                std::this_thread::sleep_for(interval - elapsed);
+                std::this_thread::sleep_for(interval - elapsed); // sleep until next loop
             }
         }
     }
 
     // Fast Thread (100Hz): Reads IMUs, calculates u, and runs UKF math
     void ImuUkfThread() {
-        const auto interval = std::chrono::milliseconds(10); 
+        const auto interval = std::chrono::milliseconds(10);  // 100hz
         auto last_time = std::chrono::steady_clock::now();
 
         while (keep_running_) {
             auto now = std::chrono::steady_clock::now();
-            double dt = std::chrono::duration<double>(now - last_time).count();
+            double dt = std::chrono::duration<double>(now - last_time).count(); // change since last loop
             last_time = now;
 
-            if (imu_mux_) {
+            if (imu_mux_) { // imu_mux_ is the pointer to the IMU multiplexer, which is running the thread loop getting readings from IMU
                 bool has_new_enc = false;
                 mycobot::Angles enc_copy;
                 {
+					// lock_guard so no one else can access encoder data while this block runs
                     std::lock_guard<std::mutex> lock(encoder_mutex_);
-                    if (new_encoder_data_ready_) {
+                    if (new_encoder_data_ready_) { // Has the encoder thread read new data?
                         enc_copy = latest_encoders_;
                         has_new_enc = true;
                         new_encoder_data_ready_ = false;
                     }
                 }
 
-                if (has_new_enc && !is_initialized_) {
-                    ukf_filter_.InitState(enc_copy);
-                    // Immediately populate the state so Start() can read it!
-                    {
-                        std::lock_guard<std::mutex> state_lock(state_mutex_);
-                        current_state_.raw_encoders = enc_copy;
-                    }
-                    is_initialized_ = true;
-                    last_time = std::chrono::steady_clock::now();
-                    continue; 
-                }
+                // if (has_new_enc && !is_initialized_) {
+                //     ukf_filter_.InitState(enc_copy); // we populate the X vector with 6 angles from encoders
+                //     // Immediately populate the state so Start() can read i	qt!
+                //     {
+                //         std::lock_guard<std::mutex> state_lock(state_mutex_);
+                //         current_state_.raw_encoders = enc_copy;
+                //     }
+                //     is_initialized_ = true; // we have populated X and dont need to again
+                //     last_time = std::chrono::steady_clock::now();
+                //     continue; 
+                // }
 
-                if (is_initialized_) {
+                if (is_initialized_) { // Base case, everything is setup, see next case for setup
                     mycobot::Angles local_target;
                     int local_speed = 0;
-                    bool is_active = active_command_;
+                    bool is_active = active_command_; // we access the atmoic bool from encoder thread, true if command sent
                     
-                    if (is_active) {
-                        std::lock_guard<std::mutex> target_lock(target_state_mutex_);
-                        local_target = target_angles_;
-                        local_speed = target_speed_;
-                    }
 
                     Eigen::Matrix<double, 6, 1> u_cmd_vel = Eigen::Matrix<double, 6, 1>::Zero();
                     mycobot::Angles current_ukf = ukf_filter_.GetFilteredAngles();
                     
                     if (is_active) {
+						{
+							// we fetch angles sent
+							std::lock_guard<std::mutex> target_lock(target_state_mutex_); // target state mutex locked in block
+							local_target = target_angles_; 
+							local_speed = target_speed_;
+						}
                         double max_err = 0.0;
                         std::array<double, 6> errors;
                         
-                        for (int i = 0; i < 6; i++) {
+                        for (int i = 0; i < 6; i++) { 
                             errors[i] = local_target[i] - current_ukf[i];
                             if (std::abs(errors[i]) > max_err) {
                                 max_err = std::abs(errors[i]);
@@ -426,22 +446,23 @@ private:
                         if (max_err > 1.0) { 
                             // Ensure speed is at least 1 to prevent division by zero
                             double safe_speed = std::max(1.0, static_cast<double>(local_speed));
-                            double max_vel = (safe_speed / 100.0) * 120.0; 
+                            double max_vel = (safe_speed / 100.0) * 160.0; // Assuming percentage is off max joint speed // https://www.elephantrobotics.com/en/mycobot-280-for-jetson-nano-specifications-en/ 
                             double estimated_time = max_err / max_vel; 
                             
                             for (int i = 0; i < 6; i++) {
-                                u_cmd_vel(i) = errors[i] / estimated_time;
+                                u_cmd_vel(i) = errors[i] / estimated_time; // estimate velocity given error and time est
                             }
                         } else {
                             active_command_ = false; 
                         }
                     }
 
+					// Read quaterions
                     std::array<double, 4> q_imu2 = imu_mux_->imu_array[0].GetAlignedQuaternion();
                     std::array<double, 4> q_imu5 = imu_mux_->imu_array[1].GetAlignedQuaternion();
 
-                    ukf_filter_.Predict(dt, u_cmd_vel);
-                    ukf_filter_.UpdateIMU(q_imu2, q_imu5);
+                    ukf_filter_.Predict(dt, u_cmd_vel); // predict 
+                    ukf_filter_.UpdateIMU(q_imu2, q_imu5); // then update imu?
                     
                     if (has_new_enc) {
                         ukf_filter_.UpdateEncoders(enc_copy);
@@ -468,7 +489,17 @@ private:
                     current_state_.raw_imu_q5 = q_imu5;
                     current_state_.cartesian_pos = pos;
                     current_state_.cartesian_orientation = rot;
-                }
+                } if else (has_new_enc) {
+                    ukf_filter_.InitState(enc_copy); // we populate the X vector with 6 angles from encoders
+                    // Immediately populate the state so Start() can read i	qt!
+                    {
+                        std::lock_guard<std::mutex> state_lock(state_mutex_);
+                        current_state_.raw_encoders = enc_copy;
+                    }
+                    is_initialized_ = true; // we have populated X and dont need to again
+                    last_time = std::chrono::steady_clock::now();
+                    // continue; 
+				};
             }
 
             auto elapsed = std::chrono::steady_clock::now() - now;
@@ -483,32 +514,32 @@ public:
     ~RobotInterface() { Stop(); }
 
     int Start() {
-        RobotPorts ports = autoDiscoverDevices();
+        RobotPorts ports = autoDiscoverDevices(); // Dont know if this should be it's own header
         if (ports.arm_port.empty() || ports.imu_port.empty()) {
             std::cerr << "Failed to discover necessary ports." << std::endl;
             return 1;
         }
 
-        imu_mux_ = std::make_unique<sensor::ImuMultiplexer>(ports.imu_port, B500000);
-        imu_mux_->Start();
-        std::this_thread::sleep_for(std::chrono::milliseconds(500)); 
+        imu_mux_ = std::make_unique<sensor::ImuMultiplexer>(ports.imu_port, B500000); // we make a pointer on the heap for our IMU class
+        imu_mux_->Start(); // starts the IMU thread loop serial read
+        std::this_thread::sleep_for(std::chrono::milliseconds(500)); // Wait IMU thread to spin up properly
         
-        imu_mux_->imu_array[0].SetMountingRotation(0.0, 1.0, 0.0, 0.0);
-        imu_mux_->imu_array[1].SetMountingRotation(0.7071, -0.7071, 0.0, 0.0);
+        imu_mux_->imu_array[0].SetMountingRotation(0.0, 1.0, 0.0, 0.0); // 180 degree rotation about x axis
+        imu_mux_->imu_array[1].SetMountingRotation(0.7071, -0.7071, 0.0, 0.0); // -90 degree rotatio  about x axis, then 90 degree rotation about y axis
 
-        if (!robot_.Connect(ports.arm_port, B1000000)) {
+        if (!robot_.Connect(ports.arm_port, B1000000)) { // We connect through our MyCobotDirect api which mimcs allows us to set our own serial port
             std::cerr << "Failed to connect to MyCobot on port " << ports.arm_port << std::endl;
             return 1;
         }
-        robot_.PowerOn();
+        robot_.PowerOn(); 
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000)); // wait for arm to boot up
 
         // We start the background threads after the robot is connected and IMUs are initialized
         if (!keep_running_) {
             keep_running_ = true;
-            io_thread_ = std::thread(&RobotInterface::EncoderCommandThread, this);
-            imu_thread_ = std::thread(&RobotInterface::ImuUkfThread, this);
+            io_thread_ = std::thread(&RobotInterface::EncoderCommandThread, this); // We start the arm thread
+            imu_thread_ = std::thread(&RobotInterface::ImuUkfThread, this); // we start the Unscented Kalman Filter thread
         }
 
 		std::cout << "Waiting for IO thread to fetch initial encoder data..." << std::flush;

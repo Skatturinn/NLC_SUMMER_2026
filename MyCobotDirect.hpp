@@ -227,9 +227,9 @@ public:
         if (fd < 0) return false;
         tcflush(fd, TCIFLUSH);
 //        FlushBuffer();
-        WriteCommand(0x20); // Read Angles
+        WriteCommand(0x20); // send Read Angles
         //std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        std::vector<uint8_t> data = ReadPacket(0x20, 150);
+        std::vector<uint8_t> data = ReadPacket(0x20, 10); // wait and read response
         
         if (data.size() >= 12) {
             for (int i = 0; i < 6; ++i) {

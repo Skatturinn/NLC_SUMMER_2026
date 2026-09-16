@@ -68,7 +68,7 @@ private:
     std::array<double, 4> q_mount_offset = {1.0, 0.0, 0.0, 0.0};
 public:
     void UpdateData(const SensorData& data, uint32_t ts) {
-        last_timestamp.store(ts);
+        last_timestamp.store(ts); // atomic store to ensure thread safety
         quat_w.store(data.quat[0]);
         quat_x.store(data.quat[1]);
         quat_y.store(data.quat[2]);
@@ -83,19 +83,24 @@ public:
 
 
     void SetMountingRotation(double w, double x, double y, double z) {
-        double mag = std::sqrt(w*w + x*x + y*y + z*z);
+        double mag = std::sqrt(w*w + x*x + y*y + z*z); // length
         if (mag < 1e-6) {
             q_mount_offset = {1.0, 0.0, 0.0, 0.0};
         } else {
-            q_mount_offset = {w/mag, x/mag, y/mag, z/mag};
+            q_mount_offset = {w/mag, x/mag, y/mag, z/mag}; // save normalized quaternion offset
         }
 //        q_mount_offset = {w, x, y, z};
     }
     std::array<double, 4> GetNormalizedQuaternion() const {
         double w = quat_w.load(), x = quat_x.load(), y = quat_y.load(), z = quat_z.load();
-        double mag = std::sqrt(w*w + x*x + y*y + z*z);
-        if (mag < 1e-6) return {1.0, 0.0, 0.0, 0.0};
-        return {w/mag, x/mag, y/mag, z/mag}; 
+        // make sure that magnitude is close to 1 in order to keep math stable
+		double mag_check = w*w + x*x + y*y + z*z;
+		if (std::abs(mag_check - 1) > 1e-6) {
+			if (mag_check < 1e-6) return {1.0, 0.0, 0.0, 0.0};
+			double mag = std::sqrt(mag_check);
+        	return {w/mag, x/mag, y/mag, z/mag}; 
+		}
+        return {w, x, y, z}; 
     }
 
     std::array<double, 4> GetMountedQuaternion() const {
@@ -123,10 +128,11 @@ public:
         double y = apply_map(map_y);
         double z = apply_map(map_z);
 
-        double mag = std::sqrt(w*w + x*x + y*y + z*z);
-        if (mag < 1e-6) return {1.0, 0.0, 0.0, 0.0};
+        // double mag = std::sqrt(w*w + x*x + y*y + z*z);
+        // if (mag < 1e-6) return {1.0, 0.0, 0.0, 0.0};
         
-        return {w/mag, x/mag, y/mag, z/mag}; 
+        // return {w/mag, x/mag, y/mag, z/mag}; 
+		return {w, x, y, z};
     }
     // nonsense --- void SetKinematicOffsets(double L, double W) {
     //    length_L = L;
@@ -208,8 +214,10 @@ public:
     }
     // Helper function for standard Quaternion multiplication
     std::array<double, 4> MultiplyQuat(const std::array<double, 4>& q1, const std::array<double, 4>& q2) const {
-        return {{
-            q1[0]*q2[0] - q1[1]*q2[1] - q1[2]*q2[2] - q1[3]*q2[3],
+        // Returns hamilton product of two quaternions q1 and q2
+		// https://en.wikipedia.org/wiki/Quaternion#Hamilton_product
+		return {{
+            q1[0]*q2[0] - q1[1]*q2[1] - q1[2]*q2[2] - q1[3]*q2[3], 
             q1[0]*q2[1] + q1[1]*q2[0] + q1[2]*q2[3] - q1[3]*q2[2],
             q1[0]*q2[2] - q1[1]*q2[3] + q1[2]*q2[0] + q1[3]*q2[1],
             q1[0]*q2[3] + q1[1]*q2[2] - q1[2]*q2[1] + q1[3]*q2[0]
@@ -293,8 +301,11 @@ public:
         auto q = GetAlignedQuaternion();
         
         // Final normalization to guarantee mathematically strict arm length
-        double mag = std::sqrt(q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3]);
-        double w = q[0]/mag, x = q[1]/mag, y = q[2]/mag, z = q[3]/mag;
+        // double mag = std::sqrt(q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3]);
+        // double w = q[0]/mag, x = q[1]/mag, y = q[2]/mag, z = q[3]/mag;
+
+        double w = q[0], x = q[1], y = q[2], z = q[3];
+
 
         double end_x = link_length_mm * (2.0*x*z + 2.0*y*w);
         double end_y = link_length_mm * (2.0*y*z - 2.0*x*w); //
@@ -337,43 +348,49 @@ private:
 
     uint8_t CalculateChecksum(const uint8_t* data, size_t length) {
         uint8_t crc = 0;
-        for (size_t i = 0; i < length; i++) crc ^= data[i];
+        for (size_t i = 0; i < length; i++) crc ^= data[i]; // bitwise XOR
         return crc;
     }
 
     void ThreadLoop() {
-        fd = open(port.c_str(), O_RDWR | O_NOCTTY | O_SYNC);
+        fd = open(port.c_str(), // Open the port to communicate with esp32 
+		O_RDWR // Read and writing
+		| O_NOCTTY // No controlling terminal, 
+		| O_SYNC // Synchronous communicatio, we finish each action at exectuion instead of chaching
+	); 
         if (fd < 0) return;
 
         struct termios tty;
         tcgetattr(fd, &tty);
-        cfsetospeed(&tty, baud_rate);
-        cfsetispeed(&tty, baud_rate);
-        tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
-        tty.c_iflag &= ~IGNBRK;
-        tty.c_lflag = 0;
-        tty.c_oflag = 0;
-        tty.c_cc[VMIN]  = 1;
-        tty.c_cc[VTIME] = 5;
+        cfsetospeed(&tty, baud_rate); // output speed set
+        cfsetispeed(&tty, baud_rate); // input speed set
+        tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8; // clear CSIZE and set it to 8 bits per byte
+        tty.c_iflag &= ~IGNBRK; // tanslate to (dont) Ignore Break
+        tty.c_lflag = 0; // turn of local flags
+        tty.c_oflag = 0; // turn of output flags ( no processing on output)
+        tty.c_cc[VMIN]  = 1; // Wait for atleast 1 byte
+        tty.c_cc[VTIME] = 5; // give up after 0.5 seconds90ö
         tty.c_iflag &= ~(IXON | IXOFF | IXANY);
         tty.c_cflag |= (CLOCAL | CREAD);
-        tcsetattr(fd, TCSANOW, &tty);
-        tcflush(fd, TCIFLUSH);
+        tcsetattr(fd, TCSANOW, &tty); // commit all rules from tty to hardware
+        tcflush(fd, TCIFLUSH); // purges input buffer
 
-        const size_t PACKET_SIZE = sizeof(ImuDataPacket);
+        const size_t PACKET_SIZE = sizeof(ImuDataPacket); // 121 bytes
         uint8_t buffer[1024];
         size_t buffer_len = 0;
 
         while (keep_running) {
             uint8_t chunk[256];
-            int n = read(fd, chunk, sizeof(chunk));
+            int n = read(fd, // read from fd
+				 chunk, // put into chunk array
+				 sizeof(chunk)); // up to 256*bytes
             
             if (n > 0) {
                 for (int i = 0; i < n; i++) {
                     if (buffer_len < sizeof(buffer)) buffer[buffer_len++] = chunk[i];
                 }
 
-                while (buffer_len >= PACKET_SIZE) {
+                while (buffer_len >= PACKET_SIZE) { // buffer >= 121 bytes ( one full imu data packet)
                     size_t start_idx = 0;
                     bool found_header = false;
                     for (size_t i = 0; i <= buffer_len - PACKET_SIZE; i++) {
@@ -384,20 +401,25 @@ private:
                         }
                     }
 
-                    if (!found_header) {
-                        buffer[0] = buffer[buffer_len - 1];
-                        buffer_len = 1;
+                    if (!found_header) { // Did not find header, leave last byte and re loop
+                        buffer[0] = buffer[buffer_len - 1]; // first item is last byte
+                        buffer_len = 1; // 1 byte left in buffer
                         break;
                     }
 
-                    if (start_idx > 0) {
-                        memmove(buffer, buffer + start_idx, buffer_len - start_idx);
-                        buffer_len -= start_idx;
+                    if (start_idx > 0) { // found header not at start, so we update buffer
+                        memmove(buffer, // destination
+							buffer + start_idx, // source
+							buffer_len - start_idx // number of bytes
+						);
+                        buffer_len -= start_idx; // we update the number of bytes in buffer
                     }
 
-                    if (buffer_len >= PACKET_SIZE) {
-                        ImuDataPacket* packet = reinterpret_cast<ImuDataPacket*>(buffer);
-                        uint8_t expected_crc = CalculateChecksum(buffer + 2, PACKET_SIZE - 3);
+                    if (buffer_len >= PACKET_SIZE) { 
+                        ImuDataPacket* packet = reinterpret_cast<ImuDataPacket*>(buffer); // reinterpet buffer (byte array) as if it was ImuDataPacket, pointer to reference and not copy
+                        uint8_t expected_crc = CalculateChecksum(buffer + 2, // buffer is a pointer to first byte, add 2 to skip the first 2 bytes (header)
+							 PACKET_SIZE - 3 // skip the first two bytes (header) and the last byte (checksum)
+							); 
                         
                         if (expected_crc == packet->checksum) {
                             imu_array[0].UpdateData(packet->sensors[0], packet->timestamp);
@@ -406,10 +428,13 @@ private:
                             memmove(buffer, buffer + PACKET_SIZE, buffer_len - PACKET_SIZE);
                             buffer_len -= PACKET_SIZE;
                         } else {
-                            memmove(buffer, buffer + 1, buffer_len - 1);
-                            buffer_len -= 1;
+                            memmove(buffer, 
+								buffer + 2, // We skip the first two bytes (header) since we had a error
+								buffer_len - 2);
+                            buffer_len -= 2;
                         }
                     }
+					// Else the buffer is missing bytes for a packet, we reloop
                 }
             }
         }
@@ -427,7 +452,7 @@ public:
     void Start() {
         if (!keep_running) {
             keep_running = true;
-            serial_thread = std::thread(&ImuMultiplexer::ThreadLoop, this);
+            serial_thread = std::thread(&ImuMultiplexer::ThreadLoop, this); // making a new thread, & address of threadloop, this is the object we are calling it on (ImuMultiplexer)
         }
     }
 

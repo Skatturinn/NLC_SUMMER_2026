@@ -4,15 +4,17 @@
 #include <vector>
 #include <iomanip>
 
+// We include the RobotInterface header to connect, control, and read state from the MyCobot robot and IMUs
 #include "RobotInterface.hpp"
 
 int main() {
-    // 1. Instantiate the new RobotInterface
+    // We create a instance of the RobotInterface class // from the header imported above
     RobotInterface robot_api;
 
-    // 2. Start the interface (Initializes ports, IMUs, Robot, and dual background threads)
     std::cout << "Starting Robot Interface...\n";
-    if (robot_api.Start() != 0) {
+
+	// We call .Start() // Line 495
+	if (robot_api.Start() != 0) {
         std::cerr << "Failed to start RobotInterface. Exiting.\n";
         return 1;
     }
