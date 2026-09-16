@@ -489,7 +489,7 @@ private:
                     current_state_.raw_imu_q5 = q_imu5;
                     current_state_.cartesian_pos = pos;
                     current_state_.cartesian_orientation = rot;
-                } if else (has_new_enc) {
+                } else if (has_new_enc) {
                     ukf_filter_.InitState(enc_copy); // we populate the X vector with 6 angles from encoders
                     // Immediately populate the state so Start() can read i	qt!
                     {
