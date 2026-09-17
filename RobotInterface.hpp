@@ -550,16 +550,21 @@ public:
         RobotState initial_state;
 
 
-        for(int i = 0; i < 30; ++i) { // 30 tries * 100ms = 3 seconds
-            if (is_initialized_.load()) {
-                initial_state = GetState();
-                ready = true;
-                std::cout << " Success!" << std::endl;
-                break;
-            }
+		while (!is_initialized_.load()) {
             std::cout << "." << std::flush;
-            std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Fixed from 1000ms
+            std::this_thread::sleep_for(std::chrono::milliseconds(500)); 
         }
+
+        // for(int i = 0; i < 30; ++i) { // 30 tries * 100ms = 3 seconds
+        //     if (is_initialized_.load()) {
+        //         initial_state = GetState();
+        //         ready = true;
+        //         std::cout << " Success!" << std::endl;
+        //         break;
+        //     }
+        //     std::cout << "." << std::flush;
+        //     std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Fixed from 1000ms
+        // }
         //for(int i = 0; i < 50; ++i) { // Give it up to 5 seconds
             // is_initialized_ is set to true by ImuUkfThread once it gets the first encoders
             //if (is_initialized_.load()) {
