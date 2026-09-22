@@ -348,7 +348,7 @@ private:
 		// we create the interval for the thread loop to be 20hz
         const auto interval = std::chrono::milliseconds(50); 
 		// we clock run time start
-		auto rext_time = std::chrono::steady_clock::now();
+		auto next_time = std::chrono::steady_clock::now();
         while (keep_running_) {
 			// we iterate next time
 			next_time += interval;
