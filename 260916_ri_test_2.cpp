@@ -5,7 +5,16 @@
 // #include <iomanip>
 
 
-// #include "RobotInterface.hpp"
+#include "RobotInterface.hpp"
+
+void printState(const RobotInterface& robot_api) {
+	const auto interval = std::chrono::milliseconds(10); // 100hz might be too fast to see
+
+	while (true) {
+		
+	}
+	RobotState state = robot_api.GetState()
+}
 
 int main() {
 

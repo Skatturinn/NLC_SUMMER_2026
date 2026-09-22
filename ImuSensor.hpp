@@ -27,7 +27,7 @@ struct SensorData {
     uint8_t calibration;  
 };
 
-struct ImuDataPacket {
+struct __attribute__((packed)) ImuDataPacket {
     uint8_t header[2];       
     uint32_t timestamp;      
     SensorData sensors[2];   
@@ -386,10 +386,19 @@ private:
 				 sizeof(chunk)); // up to 256*bytes
             
             if (n > 0) {
-                for (int i = 0; i < n; i++) {
-                    if (buffer_len < sizeof(buffer)) buffer[buffer_len++] = chunk[i];
-                }
-
+                // for (int i = 0; i < n; i++) {
+                //     if (buffer_len < sizeof(buffer)) buffer[buffer_len++] = chunk[i];
+                // }
+				if (buffer_len + n <= sizeof(buffer)) {
+					memcpy(buffer + buffer_len, chunk, n);
+					buffer_len += n;
+				} else {
+					// Buffer is completely full and out of sync. 
+					// Flush it, but keep the fresh chunk we just read.					memcpy(buffer, chunk, n);
+					memcpy(buffer, chunk, n);
+					buffer_len = n;
+					// continue; 
+				}
                 while (buffer_len >= PACKET_SIZE) { // buffer >= 121 bytes ( one full imu data packet)
                     size_t start_idx = 0;
                     bool found_header = false;

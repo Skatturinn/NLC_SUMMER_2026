@@ -345,10 +345,15 @@ private:
 
     // Slow Thread (20Hz): Writes commands and reads blocking serial bus
     void EncoderCommandThread() {
+		// we create the interval for the thread loop to be 20hz
         const auto interval = std::chrono::milliseconds(50); 
+		// we clock run time start
+		auto rext_time = std::chrono::steady_clock::now();
         while (keep_running_) {
-            auto loop_start = std::chrono::steady_clock::now();
-            bool sent_command = false;
+			// we iterate next time
+			next_time += interval;
+			// Computation
+			bool sent_command = false;
 
             {
                 std::lock_guard<std::mutex> lock(queue_mutex_); // lock queue mutex
@@ -375,23 +380,33 @@ private:
                 }
             }
 
-            auto elapsed = std::chrono::steady_clock::now() - loop_start;
-            if (elapsed < interval) {
-                std::this_thread::sleep_for(interval - elapsed); // sleep until next loop
-            }
-        }
+
+			// sleep until close to next time
+			 
+			auto sleep_time = next_time - std::chrono::milliseconds(2);
+			// we sleep to safe resources, let the hardware rest.
+            if (std::chrono::steady_clock::now() < sleep_time) {
+				std::this_thread::sleep_until(sleep_time);
+			}
+			// we boot up and start running until next time.
+			while (std::chrono::steady_clock::now() < next_time) {}
     }
 
     // Fast Thread (100Hz): Reads IMUs, calculates u, and runs UKF math
     void ImuUkfThread() {
+
+		// make interval for 100hz loop:
         const auto interval = std::chrono::milliseconds(10);  // 100hz
-        auto last_time = std::chrono::steady_clock::now();
+        const double dt = std::chrono::duration<double>(interval).count(); // 0.01 seconds
+		// mark next time to run ( now );
+		auto next_time = std::chrono::steady_clock::now();
+		// auto last_time = std::chrono::steady_clock::now();
 
         while (keep_running_) {
-            auto now = std::chrono::steady_clock::now();
-            double dt = std::chrono::duration<double>(now - last_time).count(); // change since last loop
-            last_time = now;
 
+			next_time += interval; // iterate next time
+
+			// Computation
             if (imu_mux_) { // imu_mux_ is the pointer to the IMU multiplexer, which is running the thread loop getting readings from IMU
                 bool has_new_enc = false;
                 mycobot::Angles enc_copy;
@@ -502,10 +517,16 @@ private:
 				};
             }
 
-            auto elapsed = std::chrono::steady_clock::now() - now;
-            if (elapsed < interval) {
-                std::this_thread::sleep_for(interval - elapsed);
-            }
+			// sleep until next time
+			auto sleep_time = next_time - std::chrono::milliseconds(1);
+			if (std::chrono::steady_clock::now() < sleep_time) {
+				std::this_thread::sleep_until(sleep_time);
+			}
+            // auto elapsed = std::chrono::steady_clock::now() - now;
+            // if (elapsed < interval) {
+            //     std::this_thread::sleep_for(interval - elapsed);
+            // }
+			while (std::chrono::steady_clock::now() < next_time) {}
         }
     }
 
