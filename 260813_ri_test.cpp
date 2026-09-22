@@ -22,7 +22,7 @@ int main() {
     // 3. Homing Sequence
     std::cout << "Homing robot...\n";
     mycobot::Angles home_target = {0, 0, 0, 0, 0, 0};
-    robot_api.SendAngleCommand(home_target, 30);
+    robot_api.SendAngleCommand(home_target, 1);
     std::this_thread::sleep_for(std::chrono::milliseconds(4000));
 
     // 4. Trajectory Loop Data
