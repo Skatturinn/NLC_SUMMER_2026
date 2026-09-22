@@ -692,5 +692,6 @@ public:
         return current_state_;
     }
 };
+}
 
 #endif
