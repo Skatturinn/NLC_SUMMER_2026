@@ -513,7 +513,7 @@ private:
                         current_state_.raw_encoders = enc_copy;
                     }
                     is_initialized_ = true; // we have populated X and dont need to again
-                    last_time = std::chrono::steady_clock::now();
+                    // last_time = std::chrono::steady_clock::now();
                     // continue; 
 				};
             }
