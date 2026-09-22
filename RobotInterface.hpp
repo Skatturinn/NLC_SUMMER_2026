@@ -390,6 +390,7 @@ private:
 			}
 			// we boot up and start running until next time.
 			while (std::chrono::steady_clock::now() < next_time) {}
+		}
     }
 
     // Fast Thread (100Hz): Reads IMUs, calculates u, and runs UKF math
@@ -692,6 +693,5 @@ public:
         return current_state_;
     }
 };
-}
 
 #endif
