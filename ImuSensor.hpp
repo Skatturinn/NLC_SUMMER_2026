@@ -30,7 +30,7 @@ struct SensorData {
 struct __attribute__((packed)) ImuDataPacket {
     uint8_t header[2];       
     uint32_t timestamp;      
-    SensorData sensors[2];   
+    SensorData sensors[3];   
     uint8_t checksum;        
 };
 #pragma pack(pop)
@@ -433,6 +433,7 @@ private:
                         if (expected_crc == packet->checksum) {
                             imu_array[0].UpdateData(packet->sensors[0], packet->timestamp);
                             imu_array[1].UpdateData(packet->sensors[1], packet->timestamp);
+							imu_array[2].UpdateData(packet->sensors[2], packet->timestamp);
 
                             memmove(buffer, buffer + PACKET_SIZE, buffer_len - PACKET_SIZE);
                             buffer_len -= PACKET_SIZE;
@@ -451,7 +452,7 @@ private:
     }
 
 public:
-    std::array<ImuState, 2> imu_array;
+    std::array<ImuState, 3> imu_array; // update for number of IMU
 
     ImuMultiplexer(std::string port_name, int baud = B500000) 
         : port(port_name), baud_rate(baud), fd(-1) {}

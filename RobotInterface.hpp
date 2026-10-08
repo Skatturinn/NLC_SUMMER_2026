@@ -355,7 +355,15 @@ private:
 			// Computation
 			bool sent_command = false;
 
-            {
+			mycobot::Angles encoders;
+			bool valid = robot_.GetAngles(encoders); // we read first
+			if (valid) {
+				std::lock_guard<std::mutex> lock(encoder_mutex_);
+				latest_encoders_ = encoders;
+				new_encoder_data_ready_ = true;
+			}
+            
+            { // then write
                 std::lock_guard<std::mutex> lock(queue_mutex_); // lock queue mutex
                 if (!command_queue_.empty()) { // read command queue
                     MotorCommand next_cmd = command_queue_.front(); // take first command
@@ -370,15 +378,8 @@ private:
                 }
             }
 
-            if (!sent_command) {
-                mycobot::Angles encoders;
-                bool valid = robot_.GetAngles(encoders);
-                if (valid) {
-                    std::lock_guard<std::mutex> lock(encoder_mutex_);
-                    latest_encoders_ = encoders;
-                    new_encoder_data_ready_ = true;
-                }
-            }
+
+
 
 
 			// sleep until close to next time

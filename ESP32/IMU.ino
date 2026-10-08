@@ -22,7 +22,7 @@ struct __attribute__((__packed__)) ImuDataPacket {
   uint32_t timestamp;      // ESP32 system uptime
   
   SensorData sensors[2];   // Index 0: Base, Index 1: Arm, Index 2: Wrist
-  
+	// change sensors[2] to sensors[3]
   uint8_t checksum;        
 };
 
@@ -94,7 +94,7 @@ Adafruit_BNO055 sharedBNO = Adafruit_BNO055(55, BNO_ADDR);
 
 // FIXED: Added array size to declare an array of 3 sensors
 ImuTrackedSensor imuSensors[2] = { // \squarebrackets{3}
-  // ImuTrackedSensor("BASE",  0, &sharedBNO),
+  // ImuTrackedSensor("BAE",  0, &sharedBNO),
   ImuTrackedSensor("ARM",   7, &sharedBNO),
   ImuTrackedSensor("WRIST", 4, &sharedBNO)
 };
