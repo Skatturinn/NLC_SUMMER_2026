@@ -497,7 +497,7 @@ The myCobot 280 serial bus is half-duplex and blocking. Polling encoders takes u
 #### Fast Thread: `ImuUkfThread()` (100Hz / 10ms period, lines 377-492)
 1.  **Encoder Handshake**: Checks `new_encoder_data_ready_` under `encoder_mutex_`. On the very first encoder reading after startup (`!is_initialized_`, lines 469-479), it seeds the UKF state vector via `ukf_filter_.InitState(enc_copy)` and sets `is_initialized_ = true`.
 2.  **Control Input Velocity Estimation (`u_cmd_vel`, lines 413-444)**: When `active_command_` is true, the thread estimates the instantaneous joint velocities being executed by the MyCobot internal controller. It computes the maximum joint error $\text{max err} = \max_i |\theta_{\text{target}, i} - \theta_{\text{ukf}, i}|$. Using the MyCobot 280 maximum joint speed specification of $160^\circ/\text{s}$, it scales the speed percentage:
-   $$v_{\max} = \left(\frac{\text{safe\_speed}}{100.0}\right) \times 160.0^\circ/\text{s}, \quad t_{\text{est}} = \frac{\text{max\_err}}{v_{\max}}, \quad u_{\text{cmd\_vel}}(i) = \frac{\text{error}_i}{t_{\text{est}}}$$
+   $v_{\max} = \left(\frac{\text{safe\_speed}}{100.0}\right) \times 160.0^\circ/\text{s}, \quad t_{\text{est}} = \frac{\text{max\_err}}{v_{\max}}, \quad u_{\text{cmd\_vel}}(i) = \frac{\text{error}_i}{t_{\text{est}}}$
    Once $\text{max err} \le 1.0^\circ$, it clears `active_command_ = false`.
 3.  **Sensor Fusion & Kinematics (lines 447-468)**: Reads the latest aligned quaternions `q_imu2` and `q_imu5` from `imu_mux_`, runs `Predict(dt, u_cmd_vel)` and `UpdateIMU(q_imu2, q_imu5)` every 10ms, and runs `UpdateEncoders(enc_copy)` whenever a fresh 20Hz encoder frame arrives. Finally, it computes `ForwardKinematics()` and updates `current_state_` under `state_mutex_`.
 
