@@ -156,7 +156,7 @@ std::vector<double> outputs = my_pid.getOutputs();
 
 ## Chapter 2: System Architecture & Threading Design
 
-![System Architecture](Untitled Diagram-Page-3.drawio (1)_2.png)
+![System Architecture](RobotInterface_Flowchart.svg)
 
 Because serial reading is inherently blocking, and UKF math requires precise timing, the system is designed around a multi-threaded architecture. Calling `RobotInterface::Start()` kicks off a carefully orchestrated sequence:
 
